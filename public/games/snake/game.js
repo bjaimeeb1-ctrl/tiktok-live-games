@@ -26,6 +26,7 @@
   let lastStepAt = performance.now();
   let restartTimer = null;
   let recentEvents = [];
+  let explosionFlashUntil = 0;
   const contributors = new Map();
   const giftCounters = new Map();
 
@@ -50,6 +51,13 @@
       }
     }
 
+    if (event.type === "bomb-exploded") {
+      explosionFlashUntil = performance.now() + 280;
+      const user = event.bomb.user || "viewer";
+      pushEvent(`💥 A bomba de @${user} EXPLODIU!`);
+      flashStatus(`💥 BOOM! Bomba de @${user}!`);
+    }
+
     if (event.type === "shield-used") {
       pushEvent("🛡️ Escudo salvou a cobrinha!");
       flashStatus("🛡️ ESCUDO USADO — a partida continua!");
@@ -63,27 +71,38 @@
   }
 
   function gameLoop(now) {
+    engine.updateBombs(Date.now());
+
     if (engine.alive && now - lastStepAt >= engine.tickMs) {
       lastStepAt = now;
       engine.step();
     }
 
     updatePowerBadges();
-    render();
+    render(now);
     requestAnimationFrame(gameLoop);
   }
 
-  function render() {
+  function render(now) {
     const cols = engine.columns;
     const rows = engine.rows;
     const cellW = canvas.width / cols;
     const cellH = canvas.height / rows;
+    const exploding = engine.bombs.some((bomb) => bomb.state === "exploding");
+    const shake = exploding ? 2.8 : 0;
+    const dx = shake ? (Math.random() - 0.5) * shake * 2 : 0;
+    const dy = shake ? (Math.random() - 0.5) * shake * 2 : 0;
+
+    ctx.fillStyle = "#03100d";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(dx, dy);
 
     const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
     bg.addColorStop(0, "#071611");
     bg.addColorStop(1, "#03100d");
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(-8, -8, canvas.width + 16, canvas.height + 16);
 
     ctx.strokeStyle = "rgba(83,255,139,.075)";
     ctx.lineWidth = 1;
@@ -100,40 +119,185 @@
       ctx.stroke();
     }
 
-    for (const obstacle of engine.obstacles) {
-      const x = obstacle.x * cellW;
-      const y = obstacle.y * cellH;
-      ctx.fillStyle = "#242e34";
-      roundRect(x + 3, y + 3, cellW - 6, cellH - 6, 5);
-      ctx.strokeStyle = "#59656d";
-      ctx.strokeRect(x + 6, y + 6, cellW - 12, cellH - 12);
-      ctx.strokeStyle = "rgba(255,190,70,.55)";
-      ctx.beginPath();
-      ctx.moveTo(x + 5, y + cellH - 6);
-      ctx.lineTo(x + cellW - 5, y + 6);
-      ctx.stroke();
-    }
+    for (const obstacle of engine.obstacles) drawLegacyObstacle(obstacle, cellW, cellH);
+    for (const bomb of engine.bombs) drawBomb(bomb, cellW, cellH, now);
+    for (const food of engine.food) drawFood(food, cellW, cellH);
+    drawSnake(cellW, cellH);
 
-    for (const food of engine.food) {
-      const cx = (food.x + 0.5) * cellW;
-      const cy = (food.y + 0.5) * cellH;
-      const special = food.type === "special";
-      ctx.shadowColor = special ? "#ffd45a" : "#ff3d78";
-      ctx.shadowBlur = special ? 17 : 10;
-      ctx.fillStyle = special ? "#ffd45a" : "#ff456f";
+    ctx.restore();
+
+    if (now < explosionFlashUntil) {
+      const alpha = Math.max(0, (explosionFlashUntil - now) / 280) * 0.22;
+      ctx.fillStyle = `rgba(255,188,72,${alpha})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+
+  function drawLegacyObstacle(obstacle, cellW, cellH) {
+    const x = obstacle.x * cellW;
+    const y = obstacle.y * cellH;
+    ctx.fillStyle = "#242e34";
+    roundRect(x + 3, y + 3, cellW - 6, cellH - 6, 5);
+    ctx.strokeStyle = "#59656d";
+    ctx.strokeRect(x + 6, y + 6, cellW - 12, cellH - 12);
+  }
+
+  function drawBomb(bomb, cellW, cellH, now) {
+    const cx = (bomb.x + 0.5) * cellW;
+    const cy = (bomb.y + 0.5) * cellH;
+    const size = Math.min(cellW, cellH);
+
+    if (bomb.state === "armed") {
+      const timeLeft = Math.max(0, bomb.explodeAt - Date.now());
+      const progress = 1 - timeLeft / engine.bombArmMs;
+      const pulse = 0.5 + 0.5 * Math.sin(now / 85);
+      const spawnAge = Math.max(0, Date.now() - bomb.createdAt);
+      const pop = Math.min(1, spawnAge / 240);
+      const scale = (0.72 + 0.28 * easeOutBack(pop)) * (1 + pulse * 0.035);
+
+      ctx.save();
+      ctx.fillStyle = `rgba(255,55,55,${0.035 + progress * 0.10})`;
+      ctx.strokeStyle = `rgba(255,96,62,${0.18 + progress * 0.62})`;
+      ctx.lineWidth = 1.5;
+      for (let ox = -engine.bombBlastRadius; ox <= engine.bombBlastRadius; ox += 1) {
+        for (let oy = -engine.bombBlastRadius; oy <= engine.bombBlastRadius; oy += 1) {
+          const gx = (bomb.x + ox) * cellW;
+          const gy = (bomb.y + oy) * cellH;
+          if (gx < 0 || gy < 0 || gx >= canvas.width || gy >= canvas.height) continue;
+          ctx.fillRect(gx + 2, gy + 2, cellW - 4, cellH - 4);
+          if (pulse > 0.55) ctx.strokeRect(gx + 3, gy + 3, cellW - 6, cellH - 6);
+        }
+      }
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+
+      const radius = size * 0.31;
+      const body = ctx.createRadialGradient(-radius * 0.35, -radius * 0.45, 1, 0, 0, radius);
+      body.addColorStop(0, "#667079");
+      body.addColorStop(0.24, "#2f363d");
+      body.addColorStop(1, "#080b0d");
+      ctx.shadowColor = `rgba(255,66,42,${0.25 + progress * 0.6})`;
+      ctx.shadowBlur = 8 + progress * 16;
+      ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.arc(cx, cy, Math.min(cellW, cellH) * (special ? 0.31 : 0.24), 0, Math.PI * 2);
+      ctx.arc(0, size * 0.05, radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
-      if (special) {
-        ctx.fillStyle = "#6b4f00";
-        ctx.font = `900 ${Math.max(10, cellW * 0.35)}px system-ui`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("★", cx, cy + 1);
+
+      ctx.fillStyle = "#777f85";
+      roundRect(-size * 0.11, -size * 0.30, size * 0.22, size * 0.12, size * 0.035);
+
+      ctx.strokeStyle = "#a88b61";
+      ctx.lineWidth = Math.max(2, size * 0.055);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(size * 0.02, -size * 0.29);
+      ctx.quadraticCurveTo(size * 0.16, -size * 0.47, size * 0.29, -size * 0.40);
+      ctx.stroke();
+
+      const sparkX = size * 0.30;
+      const sparkY = -size * 0.40;
+      ctx.shadowColor = "#ffb12d";
+      ctx.shadowBlur = 12 + pulse * 8;
+      ctx.fillStyle = pulse > 0.4 ? "#fff49a" : "#ff8d24";
+      ctx.beginPath();
+      ctx.arc(sparkX, sparkY, size * (0.06 + pulse * 0.025), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "#ff6b24";
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 4; i += 1) {
+        const angle = now / 120 + i * (Math.PI / 2);
+        ctx.beginPath();
+        ctx.moveTo(sparkX + Math.cos(angle) * size * 0.08, sparkY + Math.sin(angle) * size * 0.08);
+        ctx.lineTo(sparkX + Math.cos(angle) * size * 0.16, sparkY + Math.sin(angle) * size * 0.16);
+        ctx.stroke();
       }
+      ctx.restore();
+      return;
     }
 
+    if (bomb.state === "exploding") {
+      const elapsed = Date.now() - bomb.explosionStartedAt;
+      const p = Math.min(1, elapsed / engine.bombExplosionMs);
+      const radius = size * (0.45 + p * (engine.bombBlastRadius + 1.05));
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      glow.addColorStop(0, `rgba(255,255,225,${0.95 * (1 - p * 0.45)})`);
+      glow.addColorStop(0.22, `rgba(255,210,66,${0.9 * (1 - p * 0.5)})`);
+      glow.addColorStop(0.55, `rgba(255,93,31,${0.7 * (1 - p)})`);
+      glow.addColorStop(1, "rgba(255,40,20,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = `rgba(255,225,118,${1 - p})`;
+      ctx.lineWidth = Math.max(2, size * 0.09 * (1 - p));
+      ctx.beginPath();
+      ctx.arc(cx, cy, size * (0.35 + p * 1.65), 0, Math.PI * 2);
+      ctx.stroke();
+
+      for (let i = 0; i < 12; i += 1) {
+        const angle = i * (Math.PI * 2 / 12) + bomb.id * 0.41;
+        const dist = size * (0.3 + p * (0.7 + (i % 3) * 0.25));
+        const px = cx + Math.cos(angle) * dist;
+        const py = cy + Math.sin(angle) * dist;
+        ctx.fillStyle = i % 2 ? `rgba(255,111,31,${1 - p})` : `rgba(255,236,112,${1 - p})`;
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(1.5, size * 0.045 * (1 - p)), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return;
+    }
+
+    if (bomb.state === "burned") {
+      const age = Date.now() - bomb.burnedAt;
+      const life = Math.max(1, bomb.expiresAt - bomb.burnedAt);
+      const fade = Math.max(0.22, 1 - age / life);
+      const x = bomb.x * cellW;
+      const y = bomb.y * cellH;
+
+      ctx.shadowColor = `rgba(255,76,24,${0.35 * fade})`;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = `rgba(35,31,31,${0.95 * fade + 0.05})`;
+      roundRect(x + 3, y + 3, cellW - 6, cellH - 6, 5);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = `rgba(255,93,37,${0.45 * fade})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + cellW * 0.22, y + cellH * 0.20);
+      ctx.lineTo(x + cellW * 0.52, y + cellH * 0.48);
+      ctx.lineTo(x + cellW * 0.37, y + cellH * 0.78);
+      ctx.moveTo(x + cellW * 0.52, y + cellH * 0.48);
+      ctx.lineTo(x + cellW * 0.80, y + cellH * 0.30);
+      ctx.stroke();
+    }
+  }
+
+  function drawFood(food, cellW, cellH) {
+    const cx = (food.x + 0.5) * cellW;
+    const cy = (food.y + 0.5) * cellH;
+    const special = food.type === "special";
+    ctx.shadowColor = special ? "#ffd45a" : "#ff3d78";
+    ctx.shadowBlur = special ? 17 : 10;
+    ctx.fillStyle = special ? "#ffd45a" : "#ff456f";
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.min(cellW, cellH) * (special ? 0.31 : 0.24), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    if (special) {
+      ctx.fillStyle = "#6b4f00";
+      ctx.font = `900 ${Math.max(10, cellW * 0.35)}px system-ui`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("★", cx, cy + 1);
+    }
+  }
+
+  function drawSnake(cellW, cellH) {
     engine.snake.forEach((part, index) => {
       const x = part.x * cellW;
       const y = part.y * cellH;
@@ -166,6 +330,12 @@
         ctx.fill();
       }
     });
+  }
+
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
   }
 
   function roundRect(x, y, width, height, radius) {
@@ -249,7 +419,7 @@
         grow: 1,
         user: safeUser
       });
-      addContribution(safeUser, created);
+      if (created > 0) addContribution(safeUser, created);
       pushEvent(`🌹 @${safeUser} colocou ${created} comida${created === 1 ? "" : "s"}`);
       flashStatus(`🌹 @${safeUser} adicionou comida!`);
     }
@@ -261,7 +431,7 @@
         grow: 2,
         user: safeUser
       });
-      addContribution(safeUser, created * 2);
+      if (created > 0) addContribution(safeUser, created * 2);
       pushEvent(`🍩 @${safeUser} criou comida especial`);
       flashStatus(`🍩 COMIDA ESPECIAL de @${safeUser}!`);
     }
@@ -276,10 +446,12 @@
     if (action.action === "bomb") {
       const amount = Math.max(1, Math.min(4, action.amount || 1));
       let created = 0;
-      for (let i = 0; i < amount; i += 1) if (engine.addObstacle()) created += 1;
-      addContribution(safeUser, created * 2);
-      pushEvent(`💣 @${safeUser} colocou ${created} obstáculo${created === 1 ? "" : "s"}`);
-      flashStatus(`💣 Cuidado! @${safeUser} colocou uma bomba.`);
+      for (let i = 0; i < amount; i += 1) {
+        if (engine.addBomb(safeUser)) created += 1;
+      }
+      if (created > 0) addContribution(safeUser, created * 2);
+      pushEvent(`💣 @${safeUser} lançou ${created} bomba${created === 1 ? "" : "s"}!`);
+      flashStatus(`💣 CUIDADO! Bomba de @${safeUser} armada.`);
     }
 
     if (action.action === "shield") {
@@ -302,8 +474,6 @@
       config.fallbackByTier[data?.giftType] ||
       config.fallbackByTier.small;
 
-    // The current platform normalizer does not expose repeatEnd.
-    // For streak-style gifts we only apply the incremental delta to avoid x1+x2+x3 overcounting.
     const streakKey = `${normalizeUser(user)}:${data?.giftId || giftKey}`;
     const now = Date.now();
     const previous = giftCounters.get(streakKey);
