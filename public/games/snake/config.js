@@ -6,7 +6,12 @@ window.SNAKE_CONFIG = {
     turboTickMs: 88,
     restartDelayMs: 3200,
     maxFood: 28,
-    maxObstacles: 18
+    maxObstacles: 18,
+    maxBombs: 8,
+    bombArmMs: 1600,
+    bombExplosionMs: 520,
+    bombBurnedMs: 7000,
+    bombBlastRadius: 1
   },
 
   gifts: {
