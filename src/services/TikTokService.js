@@ -35,9 +35,17 @@ class TikTokService {
       return true;
     }
 
+    const signApiKey = process.env.EULER_API_KEY || process.env.SIGN_API_KEY;
+    if (!signApiKey) {
+      throw new Error(
+        "Euler Stream API key ausente. Defina EULER_API_KEY no PowerShell antes de iniciar o servidor.",
+      );
+    }
+
     console.log(`[TikTokService] Creating new connection for: ${username}`);
 
     const connection = new TikTokLiveConnection(username, {
+      signApiKey,
       processInitialData: true,
       enableExtendedGiftInfo: true,
     });
@@ -114,7 +122,7 @@ class TikTokService {
     try {
       const state = await connection.connect();
       console.log(
-        `[TikTokService] connect() resolved for ${username} (roomId: ${state?.roomId || "unknown"})`,
+        `[TikTokService] connect() resolved for ${username} (roomId: ${state?.roomId || connection.state?.roomId || "unknown"})`,
       );
       return true;
     } catch (error) {
