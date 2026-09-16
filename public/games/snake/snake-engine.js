@@ -9,6 +9,11 @@
       this.turboTickMs = options.turboTickMs ?? 88;
       this.maxFood = options.maxFood ?? 28;
       this.maxObstacles = options.maxObstacles ?? 18;
+      this.maxBombs = options.maxBombs ?? 8;
+      this.bombArmMs = options.bombArmMs ?? 1600;
+      this.bombExplosionMs = options.bombExplosionMs ?? 520;
+      this.bombBurnedMs = options.bombBurnedMs ?? 7000;
+      this.bombBlastRadius = options.bombBlastRadius ?? 1;
       this.onEvent = typeof options.onEvent === "function" ? options.onEvent : () => {};
       this.reset();
     }
@@ -25,6 +30,8 @@
       this.direction = { x: 1, y: 0 };
       this.food = [];
       this.obstacles = [];
+      this.bombs = [];
+      this.bombSeq = 0;
       this.score = 0;
       this.level = 1;
       this.shields = 0;
@@ -86,6 +93,89 @@
       return true;
     }
 
+    addBomb(user = "viewer") {
+      if (this.bombs.length >= this.maxBombs) return false;
+      const cell = this.findEmptyCell({ avoidHeadRadius: 6 });
+      if (!cell) return false;
+
+      const now = Date.now();
+      const bomb = {
+        id: ++this.bombSeq,
+        ...cell,
+        user,
+        state: "armed",
+        createdAt: now,
+        explodeAt: now + this.bombArmMs,
+        explosionEndsAt: 0,
+        expiresAt: 0
+      };
+
+      this.bombs.push(bomb);
+      this.onEvent({ type: "bomb-spawned", bomb: { ...bomb } });
+      return true;
+    }
+
+    updateBombs(now = Date.now()) {
+      if (!this.bombs.length) return;
+
+      for (const bomb of this.bombs) {
+        if (bomb.state === "armed" && now >= bomb.explodeAt) {
+          bomb.state = "exploding";
+          bomb.explosionStartedAt = now;
+          bomb.explosionEndsAt = now + this.bombExplosionMs;
+          this.onEvent({ type: "bomb-exploded", bomb: { ...bomb } });
+          this.applyBlastDamage(bomb);
+        } else if (bomb.state === "exploding" && now >= bomb.explosionEndsAt) {
+          bomb.state = "burned";
+          bomb.burnedAt = now;
+          bomb.expiresAt = now + this.bombBurnedMs;
+          this.onEvent({ type: "bomb-burned", bomb: { ...bomb } });
+        }
+      }
+
+      const expired = this.bombs.filter(
+        (bomb) => bomb.state === "burned" && now >= bomb.expiresAt
+      );
+      if (expired.length) {
+        const ids = new Set(expired.map((bomb) => bomb.id));
+        this.bombs = this.bombs.filter((bomb) => !ids.has(bomb.id));
+        for (const bomb of expired) {
+          this.onEvent({ type: "bomb-expired", bomb: { ...bomb } });
+        }
+      }
+    }
+
+    applyBlastDamage(bomb) {
+      if (!this.alive) return;
+      const hit = this.snake.some((part) => this.isInsideBlast(part, bomb));
+      if (!hit) return;
+
+      if (this.shields > 0) {
+        this.shields -= 1;
+        this.onEvent({
+          type: "shield-used",
+          collision: "blast",
+          shields: this.shields,
+          bomb: { ...bomb }
+        });
+        return;
+      }
+
+      this.alive = false;
+      this.onEvent({ type: "game-over", score: this.score, reason: "blast" });
+    }
+
+    isInsideBlast(cell, bomb) {
+      return (
+        Math.abs(cell.x - bomb.x) <= this.bombBlastRadius &&
+        Math.abs(cell.y - bomb.y) <= this.bombBlastRadius
+      );
+    }
+
+    removeBomb(id) {
+      this.bombs = this.bombs.filter((bomb) => bomb.id !== id);
+    }
+
     step() {
       if (!this.alive) return;
 
@@ -105,6 +195,9 @@
               (o) => !(o.x === next.x && o.y === next.y)
             );
           }
+          if (collision.type === "bomb" && collision.bombId) {
+            this.removeBomb(collision.bombId);
+          }
           const rescue = this.findSafestDirection();
           if (rescue) this.direction = rescue;
           this.onEvent({
@@ -115,7 +208,7 @@
           return;
         }
         this.alive = false;
-        this.onEvent({ type: "game-over", score: this.score });
+        this.onEvent({ type: "game-over", score: this.score, reason: collision.type });
         return;
       }
 
@@ -257,6 +350,19 @@
         return { type: "obstacle" };
       }
 
+      for (const bomb of this.bombs) {
+        if (
+          (bomb.state === "armed" || bomb.state === "burned") &&
+          bomb.x === cell.x &&
+          bomb.y === cell.y
+        ) {
+          return { type: "bomb", bombId: bomb.id, bombState: bomb.state };
+        }
+        if (bomb.state === "exploding" && this.isInsideBlast(cell, bomb)) {
+          return { type: "blast", bombId: bomb.id };
+        }
+      }
+
       return null;
     }
 
@@ -287,7 +393,8 @@
       return (
         this.snake.some((s) => s.x === cell.x && s.y === cell.y) ||
         this.food.some((f) => f.x === cell.x && f.y === cell.y) ||
-        this.obstacles.some((o) => o.x === cell.x && o.y === cell.y)
+        this.obstacles.some((o) => o.x === cell.x && o.y === cell.y) ||
+        this.bombs.some((bomb) => bomb.x === cell.x && bomb.y === cell.y)
       );
     }
 
