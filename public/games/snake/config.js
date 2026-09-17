@@ -18,6 +18,7 @@ window.SNAKE_CONFIG = {
     // Names are matched case-insensitively. The generic gift tier is used as fallback.
     rose: { action: "food", amount: 1, label: "Rosa", icon: "🌹" },
     heart: { action: "food", amount: 3, label: "Coração", icon: "❤️" },
+    gg: { action: "bomb", amount: 1, label: "GG", icon: "💣" },
     doughnut: { action: "specialFood", amount: 1, label: "Rosquinha", icon: "🍩" },
     donut: { action: "specialFood", amount: 1, label: "Rosquinha", icon: "🍩" },
     tiktok: { action: "turbo", durationMs: 5000, label: "TikTok", icon: "⚡" },
