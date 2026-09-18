@@ -886,11 +886,35 @@
         .map((name) => name.trim())
         .find(Boolean) || "";
 
+    const giftPtAliases = new Map([
+      ["rose", "Rosa"],
+      ["kitten", "Gatinho"],
+      ["cat", "Gatinho"],
+      ["heart", "Coração"],
+      ["heart me", "Coração"],
+      ["finger heart", "Coração com os dedos"],
+      ["hand hearts", "Corações com as mãos"],
+      ["doughnut", "Rosquinha"],
+      ["donut", "Rosquinha"],
+      ["ice cream cone", "Sorvete"],
+      ["coffee", "Café"],
+      ["crown", "Coroa"],
+      ["perfume", "Perfume"],
+      ["gg", "GG"]
+    ]);
+
+    const giftDisplayName = (gift) => {
+      const rawName = String(gift?.name || "").trim();
+      const translated = giftPtAliases.get(rawName.toLowerCase());
+      return translated ? `${translated} (${rawName})` : rawName;
+    };
+
     const optionLabel = (gift) => {
       const cost = Number(gift?.cost) || 0;
+      const name = giftDisplayName(gift);
       return cost > 0
-        ? `${gift.name} — ${cost} moeda${cost === 1 ? "" : "s"}`
-        : gift.name;
+        ? `${name} — ${cost} moeda${cost === 1 ? "" : "s"}`
+        : name;
     };
 
     const renderSelects = () => {
@@ -932,8 +956,58 @@
           select.appendChild(option);
         }
 
-        row.append(label, select);
+        const picker = document.createElement("div");
+        picker.className = "gift-select-wrap";
+
+        const preview = document.createElement("div");
+        preview.className = "gift-preview";
+
+        const image = document.createElement("img");
+        image.className = "gift-preview-image";
+        image.alt = "";
+        image.hidden = true;
+
+        const previewText = document.createElement("div");
+        previewText.className = "gift-preview-text";
+        previewText.textContent = "Nenhum presente selecionado";
+
+        preview.append(image, previewText);
+        picker.append(select, preview);
+
+        const updatePreview = () => {
+          const selectedGift = giftLibrary.find(
+            (gift) => normalizeGiftLookup(gift.name) === normalizeGiftLookup(select.value)
+          );
+
+          if (!selectedGift) {
+            image.hidden = true;
+            image.removeAttribute("src");
+            previewText.textContent = "Nenhum presente selecionado";
+            return;
+          }
+
+          const cost = Number(selectedGift.cost) || 0;
+          previewText.textContent =
+            cost > 0
+              ? `${giftDisplayName(selectedGift)} • ${cost} moeda${cost === 1 ? "" : "s"}`
+              : giftDisplayName(selectedGift);
+
+          if (selectedGift.image) {
+            image.src = selectedGift.image;
+            image.hidden = false;
+            image.onerror = () => {
+              image.hidden = true;
+            };
+          } else {
+            image.hidden = true;
+            image.removeAttribute("src");
+          }
+        };
+
+        select.addEventListener("change", updatePreview);
+        row.append(label, picker);
         rows.appendChild(row);
+        updatePreview();
       }
     };
 
