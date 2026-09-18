@@ -49,6 +49,7 @@
   const giftCounters = new Map();
 
   const giftConfigStorageKey = "snake-live-gift-config-v1";
+  const giftIdConfigStorageKey = "snake-live-gift-id-config-v1";
   const giftSlots = [
     {
       key: "food1",
@@ -88,7 +89,8 @@
     }
   ];
   let giftSettings = loadGiftSettings();
-  let configuredGiftMap = buildConfiguredGiftMap(giftSettings);
+  let giftIdSettings = loadGiftIdSettings();
+  let configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
 
   const engine = new window.SnakeEngine({
     ...config.board,
@@ -784,7 +786,9 @@
     const user = data?.user?.uniqueId || data?.user?.nickname || "viewer";
     const giftName = String(data?.giftName || "").trim().toLowerCase();
     const giftKey = giftName.replace(/\s+/g, "");
+    const giftId = String(data?.giftId || "");
     const mapping =
+      (giftId && configuredGiftMap.get(`id:${giftId}`)) ||
       configuredGiftMap.get(giftName) ||
       configuredGiftMap.get(giftKey);
 
@@ -833,7 +837,16 @@
     }
   }
 
-  function buildConfiguredGiftMap(settings) {
+  function loadGiftIdSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(giftIdConfigStorageKey) || "null");
+      return saved && typeof saved === "object" ? saved : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function buildConfiguredGiftMap(settings, idSettings = {}) {
     const map = new Map();
 
     for (const slot of giftSlots) {
@@ -846,6 +859,11 @@
         const lower = name.toLowerCase();
         map.set(lower, { ...slot.action });
         map.set(normalizeGiftLookup(name), { ...slot.action });
+      }
+
+      const giftId = String(idSettings?.[slot.key] || "").trim();
+      if (giftId) {
+        map.set(`id:${giftId}`, { ...slot.action });
       }
     }
 
@@ -902,6 +920,7 @@
         for (const gift of giftLibrary) {
           const option = document.createElement("option");
           option.value = gift.name;
+          option.dataset.giftId = gift.id || "";
           option.textContent = optionLabel(gift);
           if (
             selectedNormalized &&
@@ -950,13 +969,21 @@
 
     saveButton.addEventListener("click", () => {
       const next = {};
+      const nextIds = {};
+
       rows.querySelectorAll("[data-gift-slot]").forEach((field) => {
         next[field.dataset.giftSlot] = field.value.trim();
+        if (field.tagName === "SELECT") {
+          nextIds[field.dataset.giftSlot] =
+            field.selectedOptions?.[0]?.dataset?.giftId || "";
+        }
       });
 
       giftSettings = { ...getDefaultGiftSettings(), ...next };
-      configuredGiftMap = buildConfiguredGiftMap(giftSettings);
+      giftIdSettings = nextIds;
+      configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
       localStorage.setItem(giftConfigStorageKey, JSON.stringify(giftSettings));
+      localStorage.setItem(giftIdConfigStorageKey, JSON.stringify(giftIdSettings));
       status.textContent = "✓ Presentes salvos e ativos.";
       clearTimeout(setupGiftConfigPanel.statusTimer);
       setupGiftConfigPanel.statusTimer = setTimeout(() => {
@@ -966,8 +993,10 @@
 
     resetButton.addEventListener("click", () => {
       localStorage.removeItem(giftConfigStorageKey);
+      localStorage.removeItem(giftIdConfigStorageKey);
       giftSettings = getDefaultGiftSettings();
-      configuredGiftMap = buildConfiguredGiftMap(giftSettings);
+      giftIdSettings = {};
+      configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
 
       if (giftLibrary.length) renderSelects();
       else renderFallbackInputs();
@@ -987,12 +1016,42 @@
         throw new Error(payload?.message || "Biblioteca vazia");
       }
 
+      if (payload?.region !== "BR") {
+        throw new Error("Catálogo retornado não é da região BR");
+      }
+
       giftLibrary = payload.gifts;
+
+      const availableNames = new Set(
+        giftLibrary.map((gift) => normalizeGiftLookup(gift.name))
+      );
+      const sanitizedNames = {};
+      const sanitizedIds = {};
+
+      for (const slot of giftSlots) {
+        const currentName = firstConfiguredName(slot);
+        const match = giftLibrary.find(
+          (gift) => normalizeGiftLookup(gift.name) === normalizeGiftLookup(currentName)
+        );
+
+        sanitizedNames[slot.key] =
+          currentName && availableNames.has(normalizeGiftLookup(currentName))
+            ? currentName
+            : "";
+        sanitizedIds[slot.key] = match?.id || "";
+      }
+
+      giftSettings = sanitizedNames;
+      giftIdSettings = sanitizedIds;
+      configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
+      localStorage.setItem(giftConfigStorageKey, JSON.stringify(giftSettings));
+      localStorage.setItem(giftIdConfigStorageKey, JSON.stringify(giftIdSettings));
+
       renderSelects();
 
       if (libraryStatus) {
         libraryStatus.textContent =
-          `✓ ${giftLibrary.length} presentes carregados. Ordenados por valor em moedas.`;
+          `🇧🇷 ${giftLibrary.length} presentes do Brasil carregados. Ordenados por valor em moedas.`;
         libraryStatus.classList.remove("error");
         libraryStatus.classList.add("ready");
       }
