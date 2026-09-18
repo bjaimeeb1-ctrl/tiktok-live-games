@@ -9,7 +9,6 @@
   const recordEl = document.getElementById("record");
   const eventFeedEl = document.getElementById("eventFeed");
   const leaderboardEl = document.getElementById("leaderboard");
-  const statusStrip = document.getElementById("statusStrip");
   const giftActionLegend = document.getElementById("giftActionLegend");
   const connectionStatus = document.getElementById("connectionStatus");
   const turboBadge = document.getElementById("turboBadge");
@@ -97,6 +96,7 @@
   ];
   let giftSettings = loadGiftSettings();
   let giftIdSettings = loadGiftIdSettings();
+  let brazilGiftLibrary = [];
   let configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
 
   const engine = new window.SnakeEngine({
@@ -711,12 +711,8 @@
       .join("");
   }
 
-  function flashStatus(text) {
-    statusStrip.textContent = text;
-    clearTimeout(flashStatus.timer);
-    flashStatus.timer = setTimeout(() => {
-      statusStrip.textContent = "🎁 Cada presente ativa uma ação diferente na partida!";
-    }, 2600);
+  function flashStatus() {
+    // The center status strip was intentionally removed to keep the game field unobstructed.
   }
 
   function showGameOver(score) {
@@ -874,27 +870,58 @@
     return aliases.get(raw.toLowerCase()) || raw;
   }
 
+  function findConfiguredGift(slot) {
+    const configuredId = String(giftIdSettings?.[slot.key] || "").trim();
+    const configuredName = String(giftSettings?.[slot.key] || "").trim();
+
+    return (
+      (configuredId &&
+        brazilGiftLibrary.find((gift) => String(gift?.id || "") === configuredId)) ||
+      (configuredName &&
+        brazilGiftLibrary.find(
+          (gift) =>
+            normalizeGiftLookup(gift?.name) === normalizeGiftLookup(configuredName)
+        )) ||
+      null
+    );
+  }
+
   function renderGiftActionLegend() {
     if (!giftActionLegend) return;
 
     const active = giftSlots
-      .map((slot) => ({
-        slot,
-        name: String(giftSettings?.[slot.key] || "").trim()
-      }))
-      .filter((item) => item.name);
+      .map((slot) => {
+        const gift = findConfiguredGift(slot);
+        const configuredName = String(giftSettings?.[slot.key] || "").trim();
+        return { slot, gift, configuredName };
+      })
+      .filter((item) => item.gift || item.configuredName);
 
     if (!active.length) {
       giftActionLegend.innerHTML =
-        '<div class="gift-actions-empty">Configure os presentes no painel de teste para exibir aqui.</div>';
+        '<div class="gift-actions-empty">Configure os presentes para mostrar aqui o que cada um faz.</div>';
       return;
     }
 
     giftActionLegend.innerHTML = active
-      .map(
-        ({ slot, name }) =>
-          `<div class="gift-action-card"><div class="gift-action-name">${escapeHtml(displayGiftNameOnLive(name))}</div><div class="gift-action-effect">${escapeHtml(slot.screenEffect || slot.label)}</div></div>`
-      )
+      .map(({ slot, gift, configuredName }) => {
+        const rawName = String(gift?.name || configuredName || "").trim();
+        const displayName = displayGiftNameOnLive(rawName);
+        const cost = Number(gift?.cost) || 0;
+        const image = String(gift?.image || "").trim();
+        const visual = image
+          ? `<img class="gift-action-image" src="${escapeHtml(image)}" alt="">`
+          : `<div class="gift-action-fallback">${escapeHtml(slot.action?.icon || "🎁")}</div>`;
+
+        return `<div class="gift-action-card">
+          ${visual}
+          <div class="gift-action-copy">
+            <div class="gift-action-name">${escapeHtml(displayName)}</div>
+            ${cost > 0 ? `<div class="gift-action-cost">${cost} moeda${cost === 1 ? "" : "s"}</div>` : ""}
+            <div class="gift-action-effect">${escapeHtml(slot.label)}</div>
+          </div>
+        </div>`;
+      })
       .join("");
   }
 
@@ -929,8 +956,6 @@
     const status = document.getElementById("giftConfigStatus");
     const libraryStatus = document.getElementById("giftLibraryStatus");
     if (!rows || !saveButton || !resetButton) return;
-
-    let giftLibrary = [];
 
     const firstConfiguredName = (slot) =>
       String(giftSettings[slot.key] ?? slot.defaults)
@@ -993,7 +1018,7 @@
         const selectedNormalized = normalizeGiftLookup(selectedName);
         let selectedMatched = !selectedName;
 
-        for (const gift of giftLibrary) {
+        for (const gift of brazilGiftLibrary) {
           const option = document.createElement("option");
           option.value = gift.name;
           option.dataset.giftId = gift.id || "";
@@ -1027,7 +1052,7 @@
         picker.append(select, preview);
 
         const updatePreview = () => {
-          const selectedGift = giftLibrary.find(
+          const selectedGift = brazilGiftLibrary.find(
             (gift) => normalizeGiftLookup(gift.name) === normalizeGiftLookup(select.value)
           );
 
@@ -1096,7 +1121,7 @@
       giftIdSettings = {};
       configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
 
-      if (giftLibrary.length) renderSelects();
+      if (brazilGiftLibrary.length) renderSelects();
       else rows.innerHTML = "";
       renderGiftActionLegend();
 
@@ -1119,17 +1144,17 @@
         throw new Error("Catálogo retornado não é da região BR");
       }
 
-      giftLibrary = payload.gifts;
+      brazilGiftLibrary = payload.gifts;
 
       const availableNames = new Set(
-        giftLibrary.map((gift) => normalizeGiftLookup(gift.name))
+        brazilGiftLibrary.map((gift) => normalizeGiftLookup(gift.name))
       );
       const sanitizedNames = {};
       const sanitizedIds = {};
 
       for (const slot of giftSlots) {
         const currentName = firstConfiguredName(slot);
-        const match = giftLibrary.find(
+        const match = brazilGiftLibrary.find(
           (gift) => normalizeGiftLookup(gift.name) === normalizeGiftLookup(currentName)
         );
 
@@ -1151,7 +1176,7 @@
 
       if (libraryStatus) {
         libraryStatus.textContent =
-          `🇧🇷 ${giftLibrary.length} presentes do Brasil carregados. Ordenados por valor em moedas.`;
+          `🇧🇷 ${brazilGiftLibrary.length} presentes do Brasil carregados. Ordenados por valor em moedas.`;
         libraryStatus.classList.remove("error");
         libraryStatus.classList.add("ready");
       }
