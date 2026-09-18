@@ -22,7 +22,9 @@ window.SNAKE_CONFIG = {
     eatEnabled: true,
     eatVolume: 0.20,
     explosionEnabled: true,
-    explosionVolume: 0.42
+    explosionVolume: 0.42,
+    gameOverEnabled: true,
+    gameOverVolume: 0.22
   },
 
   gifts: {
