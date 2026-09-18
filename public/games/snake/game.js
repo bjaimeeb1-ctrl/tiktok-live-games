@@ -41,6 +41,8 @@
     eatVolume: 0.20,
     explosionEnabled: true,
     explosionVolume: 0.42,
+    gameOverEnabled: true,
+    gameOverVolume: 0.22,
     ...(config.audio || {})
   };
   const contributors = new Map();
@@ -256,6 +258,44 @@
     boom.stop(now + 0.48);
   }
 
+  function playGameOverSound(delayMs = 0) {
+    if (!audioConfig.gameOverEnabled) return;
+    const ac = getAudioContext();
+    if (!ac || ac.state !== "running") return;
+
+    const volume = safeVolume(audioConfig.gameOverVolume, 0.22);
+    const start = ac.currentTime + Math.max(0, Number(delayMs) || 0) / 1000;
+    const notes = [
+      { frequency: 330, at: 0.00, duration: 0.12 },
+      { frequency: 247, at: 0.12, duration: 0.14 },
+      { frequency: 165, at: 0.27, duration: 0.28 }
+    ];
+
+    for (const note of notes) {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      const when = start + note.at;
+
+      osc.type = "square";
+      osc.frequency.setValueAtTime(note.frequency, when);
+      osc.frequency.exponentialRampToValueAtTime(
+        Math.max(55, note.frequency * 0.82),
+        when + note.duration,
+      );
+
+      gain.gain.setValueAtTime(Math.max(0.0001, volume), when);
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        when + note.duration,
+      );
+
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(when);
+      osc.stop(when + note.duration + 0.01);
+    }
+  }
+
   document.addEventListener("pointerdown", unlockAudio, { passive: true });
   document.addEventListener("keydown", unlockAudio);
   loadTurnKeyBuffer().catch(() => {});
@@ -297,6 +337,7 @@
     }
 
     if (event.type === "game-over") {
+      playGameOverSound(event.reason === "blast" ? 160 : 0);
       showGameOver(event.score);
     }
 
@@ -815,6 +856,7 @@
     eatSound: () => playEatSound({ type: "normal" }),
     specialEatSound: () => playEatSound({ type: "special" }),
     explosionSound: playExplosionSound,
+    gameOverSound: playGameOverSound,
     unlockAudio,
     engine
   };
