@@ -10,6 +10,7 @@
   const eventFeedEl = document.getElementById("eventFeed");
   const leaderboardEl = document.getElementById("leaderboard");
   const statusStrip = document.getElementById("statusStrip");
+  const giftActionLegend = document.getElementById("giftActionLegend");
   const connectionStatus = document.getElementById("connectionStatus");
   const turboBadge = document.getElementById("turboBadge");
   const shieldBadge = document.getElementById("shieldBadge");
@@ -54,36 +55,42 @@
     {
       key: "food1",
       label: "🌹 Comida +1",
+      screenEffect: "🍎 +1 comida",
       defaults: "",
       action: { action: "food", amount: 1, label: "Comida +1", icon: "🌹" }
     },
     {
       key: "food3",
       label: "❤️ Comida +3",
+      screenEffect: "🍎 +3 comidas",
       defaults: "",
       action: { action: "food", amount: 3, label: "Comida +3", icon: "❤️" }
     },
     {
       key: "special",
       label: "🍩 Especial +5",
+      screenEffect: "⭐ Comida especial",
       defaults: "",
       action: { action: "specialFood", amount: 1, label: "Especial", icon: "🍩" }
     },
     {
       key: "turbo",
       label: "⚡ Turbo 5s",
+      screenEffect: "⚡ Turbo por 5s",
       defaults: "",
       action: { action: "turbo", durationMs: 5000, label: "Turbo", icon: "⚡" }
     },
     {
       key: "bomb",
       label: "💣 Bomba",
+      screenEffect: "💣 Lança uma bomba",
       defaults: "",
       action: { action: "bomb", amount: 1, label: "Bomba", icon: "💣" }
     },
     {
       key: "shield",
       label: "🛡️ Escudo",
+      screenEffect: "🛡️ Dá um escudo",
       defaults: "",
       action: { action: "shield", amount: 1, label: "Escudo", icon: "🛡️" }
     }
@@ -708,7 +715,7 @@
     statusStrip.textContent = text;
     clearTimeout(flashStatus.timer);
     flashStatus.timer = setTimeout(() => {
-      statusStrip.textContent = "🌹 Presentes colocam comida e mudam a partida!";
+      statusStrip.textContent = "🎁 Cada presente ativa uma ação diferente na partida!";
     }, 2600);
   }
 
@@ -844,6 +851,30 @@
     } catch {
       return {};
     }
+  }
+
+  function renderGiftActionLegend() {
+    if (!giftActionLegend) return;
+
+    const active = giftSlots
+      .map((slot) => ({
+        slot,
+        name: String(giftSettings?.[slot.key] || "").trim()
+      }))
+      .filter((item) => item.name);
+
+    if (!active.length) {
+      giftActionLegend.innerHTML =
+        '<div class="gift-actions-empty">Configure os presentes no painel de teste para exibir aqui.</div>';
+      return;
+    }
+
+    giftActionLegend.innerHTML = active
+      .map(
+        ({ slot, name }) =>
+          `<div class="gift-action-card"><div class="gift-action-name">${escapeHtml(name)}</div><div class="gift-action-effect">${escapeHtml(slot.screenEffect || slot.label)}</div></div>`
+      )
+      .join("");
   }
 
   function buildConfiguredGiftMap(settings, idSettings = {}) {
@@ -1029,6 +1060,7 @@
       configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
       localStorage.setItem(giftConfigStorageKey, JSON.stringify(giftSettings));
       localStorage.setItem(giftIdConfigStorageKey, JSON.stringify(giftIdSettings));
+      renderGiftActionLegend();
       status.textContent = "✓ Presentes salvos e ativos.";
       clearTimeout(setupGiftConfigPanel.statusTimer);
       setupGiftConfigPanel.statusTimer = setTimeout(() => {
@@ -1045,6 +1077,7 @@
 
       if (giftLibrary.length) renderSelects();
       else rows.innerHTML = "";
+      renderGiftActionLegend();
 
       status.textContent = "↻ Configuração padrão restaurada.";
       clearTimeout(setupGiftConfigPanel.statusTimer);
@@ -1093,6 +1126,7 @@
       localStorage.setItem(giftIdConfigStorageKey, JSON.stringify(giftIdSettings));
 
       renderSelects();
+      renderGiftActionLegend();
 
       if (libraryStatus) {
         libraryStatus.textContent =
@@ -1189,6 +1223,7 @@
   }
 
   renderLeaderboard();
+  renderGiftActionLegend();
   pushEvent("🐍 Cobrinha pronta. Aguardando a LIVE...");
   updateHud();
   wireTikTok();
