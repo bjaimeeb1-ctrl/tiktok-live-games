@@ -225,6 +225,12 @@
       }
 
       this.snake.unshift(next);
+      this.onEvent({
+        type: "moved",
+        head: { ...next },
+        direction: { ...this.direction },
+        turbo: Date.now() < this.turboUntil
+      });
 
       const foodIndex = this.food.findIndex((f) => f.x === next.x && f.y === next.y);
       if (foodIndex >= 0) {
