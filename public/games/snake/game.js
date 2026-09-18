@@ -706,6 +706,7 @@
   function pushEvent(text) {
     recentEvents.unshift(text);
     recentEvents = recentEvents.slice(0, 5);
+    if (!eventFeedEl) return;
     eventFeedEl.innerHTML = recentEvents
       .map((item) => `<div class="event">${escapeHtml(item)}</div>`)
       .join("");
