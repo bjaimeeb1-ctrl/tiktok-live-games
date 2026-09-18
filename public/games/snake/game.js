@@ -852,14 +852,81 @@
     return map;
   }
 
-  function setupGiftConfigPanel() {
+  async function setupGiftConfigPanel() {
     const rows = document.getElementById("giftConfigRows");
     const saveButton = document.getElementById("saveGiftConfig");
     const resetButton = document.getElementById("resetGiftConfig");
     const status = document.getElementById("giftConfigStatus");
+    const libraryStatus = document.getElementById("giftLibraryStatus");
     if (!rows || !saveButton || !resetButton) return;
 
-    const renderInputs = () => {
+    let giftLibrary = [];
+
+    const firstConfiguredName = (slot) =>
+      String(giftSettings[slot.key] ?? slot.defaults)
+        .split(",")
+        .map((name) => name.trim())
+        .find(Boolean) || "";
+
+    const optionLabel = (gift) => {
+      const cost = Number(gift?.cost) || 0;
+      return cost > 0
+        ? `${gift.name} — ${cost} moeda${cost === 1 ? "" : "s"}`
+        : gift.name;
+    };
+
+    const renderSelects = () => {
+      rows.innerHTML = "";
+
+      for (const slot of giftSlots) {
+        const row = document.createElement("div");
+        row.className = "gift-config-row";
+
+        const label = document.createElement("label");
+        label.htmlFor = `gift-${slot.key}`;
+        label.textContent = slot.label;
+
+        const select = document.createElement("select");
+        select.id = `gift-${slot.key}`;
+        select.dataset.giftSlot = slot.key;
+
+        const disabled = document.createElement("option");
+        disabled.value = "";
+        disabled.textContent = "— Nenhum presente —";
+        select.appendChild(disabled);
+
+        const selectedName = firstConfiguredName(slot);
+        const selectedNormalized = normalizeGiftLookup(selectedName);
+        let selectedMatched = !selectedName;
+
+        for (const gift of giftLibrary) {
+          const option = document.createElement("option");
+          option.value = gift.name;
+          option.textContent = optionLabel(gift);
+          if (
+            selectedNormalized &&
+            normalizeGiftLookup(gift.name) === selectedNormalized
+          ) {
+            option.selected = true;
+            selectedMatched = true;
+          }
+          select.appendChild(option);
+        }
+
+        if (selectedName && !selectedMatched) {
+          const legacy = document.createElement("option");
+          legacy.value = selectedName;
+          legacy.textContent = `${selectedName} — configuração atual`;
+          legacy.selected = true;
+          select.appendChild(legacy);
+        }
+
+        row.append(label, select);
+        rows.appendChild(row);
+      }
+    };
+
+    const renderFallbackInputs = () => {
       rows.innerHTML = "";
       for (const slot of giftSlots) {
         const row = document.createElement("div");
@@ -873,7 +940,7 @@
         input.id = `gift-${slot.key}`;
         input.type = "text";
         input.autocomplete = "off";
-        input.value = giftSettings[slot.key] ?? slot.defaults;
+        input.value = firstConfiguredName(slot);
         input.dataset.giftSlot = slot.key;
 
         row.append(label, input);
@@ -883,8 +950,8 @@
 
     saveButton.addEventListener("click", () => {
       const next = {};
-      rows.querySelectorAll("[data-gift-slot]").forEach((input) => {
-        next[input.dataset.giftSlot] = input.value.trim();
+      rows.querySelectorAll("[data-gift-slot]").forEach((field) => {
+        next[field.dataset.giftSlot] = field.value.trim();
       });
 
       giftSettings = { ...getDefaultGiftSettings(), ...next };
@@ -901,7 +968,10 @@
       localStorage.removeItem(giftConfigStorageKey);
       giftSettings = getDefaultGiftSettings();
       configuredGiftMap = buildConfiguredGiftMap(giftSettings);
-      renderInputs();
+
+      if (giftLibrary.length) renderSelects();
+      else renderFallbackInputs();
+
       status.textContent = "↻ Configuração padrão restaurada.";
       clearTimeout(setupGiftConfigPanel.statusTimer);
       setupGiftConfigPanel.statusTimer = setTimeout(() => {
@@ -909,7 +979,34 @@
       }, 2600);
     });
 
-    renderInputs();
+    try {
+      const response = await fetch("/api/gifts/catalog", { cache: "no-store" });
+      const payload = await response.json();
+
+      if (!response.ok || !Array.isArray(payload?.gifts) || !payload.gifts.length) {
+        throw new Error(payload?.message || "Biblioteca vazia");
+      }
+
+      giftLibrary = payload.gifts;
+      renderSelects();
+
+      if (libraryStatus) {
+        libraryStatus.textContent =
+          `✓ ${giftLibrary.length} presentes carregados. Ordenados por valor em moedas.`;
+        libraryStatus.classList.remove("error");
+        libraryStatus.classList.add("ready");
+      }
+    } catch (error) {
+      console.warn("[SnakeGiftConfig] Biblioteca indisponível:", error);
+      renderFallbackInputs();
+
+      if (libraryStatus) {
+        libraryStatus.textContent =
+          "Biblioteca indisponível. Você ainda pode informar o nome manualmente.";
+        libraryStatus.classList.remove("ready");
+        libraryStatus.classList.add("error");
+      }
+    }
   }
 
   function normalizeUser(value) {
