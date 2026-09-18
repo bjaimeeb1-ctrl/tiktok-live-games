@@ -16,7 +16,13 @@ window.SNAKE_CONFIG = {
 
   audio: {
     turnKeyEnabled: true,
-    turnKeyVolume: 0.26
+    turnKeyVolume: 0.62,
+    moveEnabled: true,
+    moveVolume: 0.035,
+    eatEnabled: true,
+    eatVolume: 0.20,
+    explosionEnabled: true,
+    explosionVolume: 0.42
   },
 
   gifts: {
