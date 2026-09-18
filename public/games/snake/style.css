@@ -74,29 +74,29 @@ body { display: grid; place-items: center; }
 }
 .gift-actions-panel {
   position: absolute; z-index: 7; top: 68.2%; left: 4%; right: 4%;
-  padding: 10px; border-radius: 15px;
+  padding: 8px; border-radius: 14px;
   background: rgba(4,12,16,.90); border: 1px solid rgba(88,255,130,.20);
   backdrop-filter: blur(8px);
 }
 .gift-actions-title {
-  margin-bottom: 8px; font-size: 11px; font-weight: 950;
+  margin-bottom: 6px; font-size: 9.5px; font-weight: 950;
   letter-spacing: .07em; color: var(--green);
 }
 .gift-action-grid {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
 }
 .gift-action-card {
-  min-width: 0; min-height: 66px; padding: 8px 9px; border-radius: 12px;
+  min-width: 0; min-height: 48px; padding: 6px 7px; border-radius: 10px;
   background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.09);
-  display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; align-items: center;
 }
 .gift-action-image,
 .gift-action-fallback {
-  width: 46px; height: 46px; border-radius: 10px; flex: 0 0 46px;
+  width: 34px; height: 34px; border-radius: 8px; flex: 0 0 34px;
   display: grid; place-items: center; object-fit: contain;
   background: rgba(255,255,255,.06);
 }
-.gift-action-fallback { font-size: 27px; }
+.gift-action-fallback { font-size: 21px; }
 .gift-action-copy { min-width: 0; }
 .gift-action-name {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -106,8 +106,8 @@ body { display: grid; place-items: center; }
   margin-top: 2px; color: var(--gold); font-size: 9.5px; font-weight: 850;
 }
 .gift-action-effect {
-  margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  color: #cfe8d7; font-size: 10.5px; line-height: 1.15; font-weight: 850;
+  margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: #dff5e5; font-size: 9.2px; line-height: 1.1; font-weight: 900;
 }
 .gift-actions-empty {
   grid-column: 1 / -1; padding: 12px 4px; text-align: center;
@@ -115,10 +115,9 @@ body { display: grid; place-items: center; }
 }
 .bottom-area {
   position: absolute; z-index: 7; left: 4%; right: 4%; bottom: 2.2%;
-  display: grid; grid-template-columns: 1.25fr .75fr; gap: 8px;
 }
-.event-feed, .leaderboard {
-  min-height: 152px; border-radius: 15px; padding: 10px;
+.leaderboard {
+  min-height: 92px; border-radius: 15px; padding: 9px 10px;
   background: rgba(4,12,16,.84); border: 1px solid rgba(255,255,255,.08);
   backdrop-filter: blur(8px);
 }
