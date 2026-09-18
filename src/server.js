@@ -134,6 +134,45 @@ function normalizeCatalogGift(row = {}) {
   };
 }
 
+function extractRegionalGiftRows(payload = {}) {
+  const candidates = [
+    payload?.gifts,
+    payload?.gift_list,
+    payload?.giftList,
+    payload?.data?.gifts,
+    payload?.data?.gift_list,
+    payload?.data?.giftList,
+    payload?.data?.gift_data,
+    payload?.data?.giftData,
+  ];
+
+  return candidates.find(Array.isArray) || [];
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+    let payload = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = {};
+    }
+
+    return { response, payload };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchEulerGiftCatalog() {
   const apiKey = process.env.EULER_API_KEY;
   if (!apiKey) {
@@ -147,67 +186,66 @@ async function fetchEulerGiftCatalog() {
     return giftCatalogCache.gifts;
   }
 
-  const all = [];
-  let totalPages = 1;
+  // Important: this is the regional TikTok gift endpoint, NOT Euler's global catalog.
+  // The requested region is locked to Brazil so only gifts TikTok exposes in BR
+  // are offered by the Snake gift configurator.
+  const regionalEndpoint = new URL("/webcast/gifts", EULER_API_BASE);
+  regionalEndpoint.searchParams.set("region", "BR");
+  regionalEndpoint.searchParams.set("webcast_language", "pt");
+  regionalEndpoint.searchParams.set("redirect", "false");
 
-  for (let pageNumber = 1; pageNumber <= totalPages && pageNumber <= 20; pageNumber += 1) {
-    const url = new URL("/webcast/gifts/catalog", EULER_API_BASE);
-    url.searchParams.set("pageSize", "100");
-    url.searchParams.set("pageNumber", String(pageNumber));
+  const headers = {
+    "X-Api-Key": apiKey,
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+  const { response: signedResponse, payload: signedPayload } = await fetchJson(
+    regionalEndpoint,
+    { headers }
+  );
 
-    let response;
-    try {
-      response = await fetch(url, {
+  if (!signedResponse.ok) {
+    const message =
+      signedPayload?.message ||
+      `Euler Brazil gifts request failed with HTTP ${signedResponse.status}`;
+    throw new Error(message);
+  }
+
+  // Euler returns the signed TikTok URL for the selected region.
+  // Fetch it server-side so the API key never reaches the browser.
+  const signedUrl = signedPayload?.url;
+  let regionalPayload = signedPayload;
+
+  if (signedUrl) {
+    const { response: tikTokResponse, payload: tikTokPayload } = await fetchJson(
+      signedUrl,
+      {
         headers: {
-          "X-Api-Key": apiKey,
-          Authorization: `Bearer ${apiKey}`,
           Accept: "application/json",
+          "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
         },
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    const text = await response.text();
-    let payload = {};
-    try {
-      payload = text ? JSON.parse(text) : {};
-    } catch {
-      payload = {};
-    }
-
-    if (!response.ok) {
-      const message =
-        payload?.message ||
-        `Euler gift catalog request failed with HTTP ${response.status}`;
-      throw new Error(message);
-    }
-
-    const rows = Array.isArray(payload?.gifts)
-      ? payload.gifts
-      : Array.isArray(payload?.data?.gifts)
-        ? payload.data.gifts
-        : [];
-
-    for (const row of rows) {
-      const gift = normalizeCatalogGift(row);
-      if (gift) all.push(gift);
-    }
-
-    totalPages = Math.max(
-      1,
-      Number(payload?.totalPages || payload?.total_pages || 1) || 1
+      }
     );
 
-    if (!rows.length) break;
+    if (!tikTokResponse.ok) {
+      throw new Error(
+        `TikTok Brazil gift list request failed with HTTP ${tikTokResponse.status}`
+      );
+    }
+
+    regionalPayload = tikTokPayload;
+  }
+
+  const rows = extractRegionalGiftRows(regionalPayload);
+  if (!rows.length) {
+    throw new Error("TikTok returned no gifts for region BR");
   }
 
   const seen = new Set();
-  const gifts = all
+  const gifts = rows
+    .map(normalizeCatalogGift)
+    .filter(Boolean)
     .filter((gift) => {
       const key = gift.id || gift.name.toLowerCase();
       if (seen.has(key)) return false;
@@ -218,6 +256,10 @@ async function fetchEulerGiftCatalog() {
       const costDiff = (a.cost || 0) - (b.cost || 0);
       return costDiff || a.name.localeCompare(b.name, "pt-BR");
     });
+
+  if (!gifts.length) {
+    throw new Error("Could not normalize TikTok gifts for region BR");
+  }
 
   giftCatalogCache = { at: Date.now(), gifts };
   return gifts;
@@ -267,6 +309,7 @@ app.get("/api/gifts/catalog", async (req, res) => {
     const gifts = await fetchEulerGiftCatalog();
     res.json({
       status: "ok",
+      region: "BR",
       count: gifts.length,
       gifts,
       cachedAt: giftCatalogCache.at,
