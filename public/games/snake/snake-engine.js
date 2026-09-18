@@ -179,6 +179,7 @@
     step() {
       if (!this.alive) return;
 
+      const previousDirection = { ...this.direction };
       this.direction = this.chooseDirection();
       const head = this.snake[0];
       const next = {
@@ -210,6 +211,17 @@
         this.alive = false;
         this.onEvent({ type: "game-over", score: this.score, reason: collision.type });
         return;
+      }
+
+      if (
+        previousDirection.x !== this.direction.x ||
+        previousDirection.y !== this.direction.y
+      ) {
+        this.onEvent({
+          type: "direction-changed",
+          from: previousDirection,
+          to: { ...this.direction }
+        });
       }
 
       this.snake.unshift(next);
