@@ -14,6 +14,9 @@ import {
 import { getDelay, shouldRetry, sleep } from "../lib/tiktokReconnectPolicy.js";
 
 const EULER_WS_URL = "wss://ws.eulerstream.com";
+const EULER_LIVE_VALIDATION_MS = 1000;
+const EULER_OFFLINE_RETRY_MS = 15000;
+const EULER_OFFLINE_MAX_RETRIES = 20;
 
 class TikTokService {
   constructor() {
@@ -30,7 +33,7 @@ class TikTokService {
     );
   }
 
-  async connect(username, io) {
+  async connect(username, io, options = {}) {
     if (this.connections.has(username)) {
       console.log(`[TikTokService] Reusing existing connection for: ${username}`);
       const existing = this.connections.get(username);
@@ -69,18 +72,14 @@ class TikTokService {
     });
     this.reconnectState.delete(username);
 
-    let opened = false;
     let manuallyClosed = false;
+    let liveConfirmed = false;
 
     ws.addEventListener("open", () => {
-      opened = true;
       this.updateActivity(username);
-      console.log(`[TikTokService] Connected via Euler WebSocket: ${username}`);
-      io.to(username).emit("tiktok_connected", {
-        roomId: null,
-        timestamp: Date.now(),
-        transport: "euler-websocket",
-      });
+      console.log(
+        `[TikTokService] Euler socket opened for ${username}; validating LIVE...`,
+      );
     });
 
     ws.addEventListener("message", async (event) => {
@@ -133,26 +132,38 @@ class TikTokService {
         timestamp: Date.now(),
       });
 
-      if (!manuallyClosed && code !== 1000 && code !== 4005 && this.getClientCount(username) > 0) {
-        this._scheduleReconnect(username, io);
+      if (
+        !manuallyClosed &&
+        options.scheduleOnClose !== false &&
+        code !== 1000 &&
+        code !== 4005 &&
+        this.getClientCount(username) > 0
+      ) {
+        this._scheduleReconnect(username, io, { offline: code === 4404 });
       }
     });
 
     try {
       await new Promise((resolve, reject) => {
+        let validationTimer = null;
+
         const timeout = setTimeout(() => {
+          cleanup();
           reject(new Error("Timeout ao conectar ao Euler WebSocket."));
         }, 15000);
 
         const onOpen = () => {
-          clearTimeout(timeout);
-          cleanup();
-          resolve();
+          validationTimer = setTimeout(() => {
+            liveConfirmed = true;
+            clearTimeout(timeout);
+            cleanup();
+            resolve();
+          }, EULER_LIVE_VALIDATION_MS);
         };
 
         const onClose = (event) => {
-          if (opened) return;
           clearTimeout(timeout);
+          if (validationTimer) clearTimeout(validationTimer);
           cleanup();
           const code = Number(event?.code || 0);
           reject(
@@ -169,6 +180,14 @@ class TikTokService {
 
         ws.addEventListener("open", onOpen);
         ws.addEventListener("close", onClose);
+      });
+
+      this.updateActivity(username);
+      console.log(`[TikTokService] LIVE confirmed via Euler: ${username}`);
+      io.to(username).emit("tiktok_connected", {
+        roomId: null,
+        timestamp: Date.now(),
+        transport: "euler-websocket",
       });
 
       return true;
@@ -256,42 +275,58 @@ class TikTokService {
     return reasons[code] || "";
   }
 
-  async _scheduleReconnect(username, io) {
+  async _scheduleReconnect(username, io, options = {}) {
     const state = this.reconnectState.get(username);
     if (state?.attempting) return;
 
     let attempt = 0;
-    this.reconnectState.set(username, { attempting: true, attempt });
+    let offline = Boolean(options.offline);
+    this.reconnectState.set(username, { attempting: true, attempt, offline });
 
-    while (shouldRetry(attempt)) {
+    while (
+      shouldRetry(
+        attempt,
+        offline ? { maxRetries: EULER_OFFLINE_MAX_RETRIES } : {},
+      )
+    ) {
       if (this.getClientCount(username) === 0) break;
       if (this.connections.has(username)) break;
 
-      const delay = getDelay(attempt);
+      const delay = offline
+        ? EULER_OFFLINE_RETRY_MS
+        : getDelay(attempt);
+
       console.log(
-        `[TikTokService] Reconnect attempt ${attempt + 1} for ${username} in ${delay}ms`,
+        `[TikTokService] Reconnect attempt ${attempt + 1} for ${username} in ${delay}ms${offline ? " (aguardando LIVE)" : ""}`,
       );
       io.to(username).emit("tiktok_reconnecting", {
         attempt: attempt + 1,
         delayMs: delay,
+        offline,
         timestamp: Date.now(),
       });
 
       await sleep(delay);
 
       try {
-        await this.connect(username, io);
-        console.log(`[TikTokService] Reconnected to ${username} on attempt ${attempt + 1}`);
+        await this.connect(username, io, { scheduleOnClose: false });
+        console.log(
+          `[TikTokService] Reconnected to ${username} on attempt ${attempt + 1}`,
+        );
         this.reconnectState.delete(username);
         return;
       } catch (error) {
+        const message = String(error?.message || error);
+        if (message.includes("(4404)") || /not currently live/i.test(message)) {
+          offline = true;
+        }
         console.error(
-          `[TikTokService] Reconnect attempt ${attempt + 1} failed for ${username}: ${error?.message || error}`,
+          `[TikTokService] Reconnect attempt ${attempt + 1} failed for ${username}: ${message}`,
         );
       }
 
       attempt += 1;
-      this.reconnectState.set(username, { attempting: true, attempt });
+      this.reconnectState.set(username, { attempting: true, attempt, offline });
     }
 
     this.reconnectState.delete(username);
