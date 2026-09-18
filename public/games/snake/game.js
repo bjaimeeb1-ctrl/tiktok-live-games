@@ -85,44 +85,80 @@
       return;
     }
 
-    const volume = Math.max(0, Math.min(1, Number(audioConfig.turnKeyVolume) || 0.26));
+    const volume = Math.max(
+      0,
+      Math.min(1, Number(audioConfig.turnKeyVolume) || 0.26),
+    );
     const now = ac.currentTime;
+    const pitchJitter = 0.96 + Math.random() * 0.08;
 
-    const playClick = (when, level, frequency) => {
+    const makeNoiseClick = (when, duration, frequency, q, level) => {
+      const frameCount = Math.max(1, Math.floor(ac.sampleRate * duration));
+      const buffer = ac.createBuffer(1, frameCount, ac.sampleRate);
+      const data = buffer.getChannelData(0);
+
+      for (let i = 0; i < frameCount; i += 1) {
+        const p = i / frameCount;
+        // Very fast mechanical impact: crisp at the start, almost no tail.
+        const envelope = Math.pow(1 - p, 8);
+        data[i] = (Math.random() * 2 - 1) * envelope;
+      }
+
       const source = ac.createBufferSource();
       const filter = ac.createBiquadFilter();
       const gain = ac.createGain();
 
-      source.buffer = getKeyNoiseBuffer(ac);
+      source.buffer = buffer;
       filter.type = "bandpass";
-      filter.frequency.setValueAtTime(frequency, when);
-      filter.Q.setValueAtTime(0.9, when);
+      filter.frequency.setValueAtTime(frequency * pitchJitter, when);
+      filter.Q.setValueAtTime(q, when);
 
       gain.gain.setValueAtTime(Math.max(0.0001, volume * level), when);
-      gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.048);
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        when + Math.max(0.006, duration),
+      );
 
       source.connect(filter);
       filter.connect(gain);
       gain.connect(ac.destination);
       source.start(when);
-      source.stop(when + 0.055);
+      source.stop(when + duration);
     };
 
-    // Mechanical key down + a softer key-up clack.
-    playClick(now, 0.95, 1850);
-    playClick(now + 0.032, 0.48, 1150);
+    const makeKeycapBody = (when, frequency, level, duration) => {
+      const oscillator = ac.createOscillator();
+      const filter = ac.createBiquadFilter();
+      const gain = ac.createGain();
 
-    const thump = ac.createOscillator();
-    const thumpGain = ac.createGain();
-    thump.type = "triangle";
-    thump.frequency.setValueAtTime(115, now);
-    thump.frequency.exponentialRampToValueAtTime(78, now + 0.035);
-    thumpGain.gain.setValueAtTime(volume * 0.16, now);
-    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
-    thump.connect(thumpGain);
-    thumpGain.connect(ac.destination);
-    thump.start(now);
-    thump.stop(now + 0.045);
+      oscillator.type = "triangle";
+      oscillator.frequency.setValueAtTime(frequency * pitchJitter, when);
+      oscillator.frequency.exponentialRampToValueAtTime(
+        frequency * 0.72 * pitchJitter,
+        when + duration,
+      );
+
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(900, when);
+
+      gain.gain.setValueAtTime(Math.max(0.0001, volume * level), when);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
+
+      oscillator.connect(filter);
+      filter.connect(gain);
+      gain.connect(ac.destination);
+      oscillator.start(when);
+      oscillator.stop(when + duration);
+    };
+
+    // A distinct keyboard key press: sharp switch click + short keycap "clack".
+    makeNoiseClick(now, 0.014, 3400, 2.5, 0.95);
+    makeNoiseClick(now + 0.004, 0.020, 1650, 1.35, 0.48);
+    makeKeycapBody(now, 230, 0.22, 0.028);
+
+    // Small key-release click so it reads as a real key, not a game beep.
+    makeNoiseClick(now + 0.046, 0.012, 2450, 2.1, 0.42);
+    makeKeycapBody(now + 0.044, 170, 0.10, 0.022);
   }
 
   document.addEventListener("pointerdown", unlockAudio, { passive: true });
