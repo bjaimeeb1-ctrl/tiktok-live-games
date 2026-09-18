@@ -14,6 +14,11 @@ window.SNAKE_CONFIG = {
     bombBlastRadius: 1
   },
 
+  audio: {
+    turnKeyEnabled: true,
+    turnKeyVolume: 0.26
+  },
+
   gifts: {
     // Names are matched case-insensitively. The generic gift tier is used as fallback.
     rose: { action: "food", amount: 1, label: "Rosa", icon: "🌹" },
