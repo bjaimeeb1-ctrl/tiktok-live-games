@@ -853,6 +853,27 @@
     }
   }
 
+  function displayGiftNameOnLive(name) {
+    const aliases = new Map([
+      ["rose", "Rosa"],
+      ["kitten", "Gatinho"],
+      ["cat", "Gatinho"],
+      ["heart", "Coração"],
+      ["heart me", "Coração"],
+      ["finger heart", "Coração com os dedos"],
+      ["hand hearts", "Corações com as mãos"],
+      ["doughnut", "Rosquinha"],
+      ["donut", "Rosquinha"],
+      ["ice cream cone", "Sorvete"],
+      ["coffee", "Café"],
+      ["crown", "Coroa"],
+      ["perfume", "Perfume"],
+      ["gg", "GG"]
+    ]);
+    const raw = String(name || "").trim();
+    return aliases.get(raw.toLowerCase()) || raw;
+  }
+
   function renderGiftActionLegend() {
     if (!giftActionLegend) return;
 
@@ -872,7 +893,7 @@
     giftActionLegend.innerHTML = active
       .map(
         ({ slot, name }) =>
-          `<div class="gift-action-card"><div class="gift-action-name">${escapeHtml(name)}</div><div class="gift-action-effect">${escapeHtml(slot.screenEffect || slot.label)}</div></div>`
+          `<div class="gift-action-card"><div class="gift-action-name">${escapeHtml(displayGiftNameOnLive(name))}</div><div class="gift-action-effect">${escapeHtml(slot.screenEffect || slot.label)}</div></div>`
       )
       .join("");
   }
