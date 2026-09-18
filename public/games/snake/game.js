@@ -27,6 +27,13 @@
   let restartTimer = null;
   let recentEvents = [];
   let explosionFlashUntil = 0;
+  let audioContext = null;
+  let keyNoiseBuffer = null;
+  const audioConfig = {
+    turnKeyEnabled: true,
+    turnKeyVolume: 0.26,
+    ...(config.audio || {})
+  };
   const contributors = new Map();
   const giftCounters = new Map();
 
@@ -37,7 +44,95 @@
 
   recordEl.textContent = record;
 
+  function getAudioContext() {
+    if (audioContext) return audioContext;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    audioContext = new AudioContextClass();
+    return audioContext;
+  }
+
+  function unlockAudio() {
+    const ac = getAudioContext();
+    if (!ac || ac.state === "running") return;
+    ac.resume().catch(() => {});
+  }
+
+  function getKeyNoiseBuffer(ac) {
+    if (keyNoiseBuffer) return keyNoiseBuffer;
+    const duration = 0.055;
+    const frameCount = Math.max(1, Math.floor(ac.sampleRate * duration));
+    const buffer = ac.createBuffer(1, frameCount, ac.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < frameCount; i += 1) {
+      const envelope = Math.pow(1 - i / frameCount, 3.2);
+      data[i] = (Math.random() * 2 - 1) * envelope;
+    }
+
+    keyNoiseBuffer = buffer;
+    return buffer;
+  }
+
+  function playTurnKeySound() {
+    if (!audioConfig.turnKeyEnabled) return;
+
+    const ac = getAudioContext();
+    if (!ac) return;
+
+    if (ac.state !== "running") {
+      ac.resume().catch(() => {});
+      return;
+    }
+
+    const volume = Math.max(0, Math.min(1, Number(audioConfig.turnKeyVolume) || 0.26));
+    const now = ac.currentTime;
+
+    const playClick = (when, level, frequency) => {
+      const source = ac.createBufferSource();
+      const filter = ac.createBiquadFilter();
+      const gain = ac.createGain();
+
+      source.buffer = getKeyNoiseBuffer(ac);
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(frequency, when);
+      filter.Q.setValueAtTime(0.9, when);
+
+      gain.gain.setValueAtTime(Math.max(0.0001, volume * level), when);
+      gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.048);
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(ac.destination);
+      source.start(when);
+      source.stop(when + 0.055);
+    };
+
+    // Mechanical key down + a softer key-up clack.
+    playClick(now, 0.95, 1850);
+    playClick(now + 0.032, 0.48, 1150);
+
+    const thump = ac.createOscillator();
+    const thumpGain = ac.createGain();
+    thump.type = "triangle";
+    thump.frequency.setValueAtTime(115, now);
+    thump.frequency.exponentialRampToValueAtTime(78, now + 0.035);
+    thumpGain.gain.setValueAtTime(volume * 0.16, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    thump.connect(thumpGain);
+    thumpGain.connect(ac.destination);
+    thump.start(now);
+    thump.stop(now + 0.045);
+  }
+
+  document.addEventListener("pointerdown", unlockAudio, { passive: true });
+  document.addEventListener("keydown", unlockAudio);
+
   function handleEngineEvent(event) {
+    if (event.type === "direction-changed") {
+      playTurnKeySound();
+    }
+
     if (event.type === "ate") {
       const user = event.food.user;
       if (user && user !== "JOGO") {
@@ -577,6 +672,8 @@
   window.SnakeLiveTest = {
     action: processAction,
     reset: () => engine.reset(),
+    keySound: playTurnKeySound,
+    unlockAudio,
     engine
   };
 })();
