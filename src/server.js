@@ -118,8 +118,20 @@ function normalizeCatalogGift(row = {}) {
       nested.picture_url,
       nested.image?.urlList?.[0],
       nested.image?.url_list?.[0],
+      nested.image?.urls?.[0],
+      nested.image?.url,
       nested.icon?.urlList?.[0],
       nested.icon?.url_list?.[0],
+      nested.icon?.urls?.[0],
+      nested.icon?.url,
+      row.image?.urlList?.[0],
+      row.image?.url_list?.[0],
+      row.image?.urls?.[0],
+      row.image?.url,
+      row.icon?.urlList?.[0],
+      row.icon?.url_list?.[0],
+      row.icon?.urls?.[0],
+      row.icon?.url,
       ""
     )
   );
