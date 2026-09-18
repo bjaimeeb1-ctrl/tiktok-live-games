@@ -1,7 +1,7 @@
 window.SNAKE_CONFIG = {
   board: {
     columns: 22,
-    rows: 30,
+    rows: 22,
     normalTickMs: 155,
     turboTickMs: 88,
     restartDelayMs: 3200,
