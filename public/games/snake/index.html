@@ -65,6 +65,20 @@
       <input id="testUser" value="jaime" maxlength="24" aria-label="Usuário de teste" />
       <div id="testButtons" class="test-buttons"></div>
       <button id="testReset" class="test-reset" type="button">↻ Reiniciar partida</button>
+
+      <div class="gift-config">
+        <div class="gift-config-head">
+          <h3>🎁 Configurar presentes</h3>
+          <span>Salva neste navegador</span>
+        </div>
+        <p>Use o nome que aparece no evento do TikTok. Para vários nomes, separe por vírgula.</p>
+        <div id="giftConfigRows" class="gift-config-rows"></div>
+        <div class="gift-config-actions">
+          <button id="saveGiftConfig" class="gift-save" type="button">Salvar presentes</button>
+          <button id="resetGiftConfig" class="gift-defaults" type="button">Padrão</button>
+        </div>
+        <div id="giftConfigStatus" class="gift-config-status" aria-live="polite"></div>
+      </div>
     </aside>
 
     <script src="/socket.io/socket.io.js"></script>
