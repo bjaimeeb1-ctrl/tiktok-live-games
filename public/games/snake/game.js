@@ -786,9 +786,10 @@
     const giftKey = giftName.replace(/\s+/g, "");
     const mapping =
       configuredGiftMap.get(giftName) ||
-      configuredGiftMap.get(giftKey) ||
-      config.fallbackByTier[data?.giftType] ||
-      config.fallbackByTier.small;
+      configuredGiftMap.get(giftKey);
+
+    // Only explicitly configured gifts can trigger game actions.
+    if (!mapping) return;
 
     const streakKey = `${normalizeUser(user)}:${data?.giftId || giftKey}`;
     const now = Date.now();
