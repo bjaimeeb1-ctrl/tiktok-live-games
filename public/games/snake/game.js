@@ -28,10 +28,19 @@
   let recentEvents = [];
   let explosionFlashUntil = 0;
   let audioContext = null;
-  let keyNoiseBuffer = null;
+  let turnKeyBuffer = null;
+  let turnKeyBufferPromise = null;
+  let explosionNoiseBuffer = null;
+  let moveSoundFlip = false;
   const audioConfig = {
     turnKeyEnabled: true,
-    turnKeyVolume: 0.26,
+    turnKeyVolume: 0.62,
+    moveEnabled: true,
+    moveVolume: 0.035,
+    eatEnabled: true,
+    eatVolume: 0.20,
+    explosionEnabled: true,
+    explosionVolume: 0.42,
     ...(config.audio || {})
   };
   const contributors = new Map();
@@ -52,124 +61,216 @@
     return audioContext;
   }
 
-  function unlockAudio() {
-    const ac = getAudioContext();
-    if (!ac || ac.state === "running") return;
-    ac.resume().catch(() => {});
+  function safeVolume(value, fallback) {
+    const parsed = Number(value);
+    return Math.max(0, Math.min(1, Number.isFinite(parsed) ? parsed : fallback));
   }
 
-  function getKeyNoiseBuffer(ac) {
-    if (keyNoiseBuffer) return keyNoiseBuffer;
-    const duration = 0.055;
-    const frameCount = Math.max(1, Math.floor(ac.sampleRate * duration));
-    const buffer = ac.createBuffer(1, frameCount, ac.sampleRate);
-    const data = buffer.getChannelData(0);
+  function unlockAudio() {
+    const ac = getAudioContext();
+    if (!ac) return;
+    if (ac.state !== "running") ac.resume().catch(() => {});
+    loadTurnKeyBuffer().catch(() => {});
+  }
 
-    for (let i = 0; i < frameCount; i += 1) {
-      const envelope = Math.pow(1 - i / frameCount, 3.2);
-      data[i] = (Math.random() * 2 - 1) * envelope;
-    }
+  function loadTurnKeyBuffer() {
+    if (turnKeyBuffer) return Promise.resolve(turnKeyBuffer);
+    if (turnKeyBufferPromise) return turnKeyBufferPromise;
 
-    keyNoiseBuffer = buffer;
-    return buffer;
+    const ac = getAudioContext();
+    const src = window.SNAKE_AUDIO_ASSETS?.turnKey;
+    if (!ac || !src) return Promise.resolve(null);
+
+    turnKeyBufferPromise = fetch(src)
+      .then((response) => response.arrayBuffer())
+      .then((data) => ac.decodeAudioData(data.slice(0)))
+      .then((buffer) => {
+        turnKeyBuffer = buffer;
+        return buffer;
+      })
+      .catch((error) => {
+        console.warn("[SnakeAudio] Falha ao carregar clique de teclado:", error);
+        turnKeyBufferPromise = null;
+        return null;
+      });
+
+    return turnKeyBufferPromise;
+  }
+
+  function playAudioBuffer(buffer, volume, playbackRate = 1) {
+    const ac = getAudioContext();
+    if (!ac || ac.state !== "running" || !buffer) return;
+
+    const source = ac.createBufferSource();
+    const gain = ac.createGain();
+    source.buffer = buffer;
+    source.playbackRate.value = playbackRate;
+    gain.gain.value = volume;
+    source.connect(gain);
+    gain.connect(ac.destination);
+    source.start();
   }
 
   function playTurnKeySound() {
     if (!audioConfig.turnKeyEnabled) return;
-
     const ac = getAudioContext();
-    if (!ac) return;
+    if (!ac || ac.state !== "running") return;
 
-    if (ac.state !== "running") {
-      ac.resume().catch(() => {});
+    const volume = safeVolume(audioConfig.turnKeyVolume, 0.62);
+    if (turnKeyBuffer) {
+      playAudioBuffer(turnKeyBuffer, volume);
       return;
     }
 
-    const volume = Math.max(
-      0,
-      Math.min(1, Number(audioConfig.turnKeyVolume) || 0.26),
-    );
-    const now = ac.currentTime;
-    const pitchJitter = 0.96 + Math.random() * 0.08;
-
-    const makeNoiseClick = (when, duration, frequency, q, level) => {
-      const frameCount = Math.max(1, Math.floor(ac.sampleRate * duration));
-      const buffer = ac.createBuffer(1, frameCount, ac.sampleRate);
-      const data = buffer.getChannelData(0);
-
-      for (let i = 0; i < frameCount; i += 1) {
-        const p = i / frameCount;
-        // Very fast mechanical impact: crisp at the start, almost no tail.
-        const envelope = Math.pow(1 - p, 8);
-        data[i] = (Math.random() * 2 - 1) * envelope;
+    loadTurnKeyBuffer().then((buffer) => {
+      if (buffer && ac.state === "running") {
+        playAudioBuffer(buffer, volume);
       }
+    });
+  }
 
-      const source = ac.createBufferSource();
-      const filter = ac.createBiquadFilter();
-      const gain = ac.createGain();
+  function playMoveSound() {
+    if (!audioConfig.moveEnabled) return;
+    const ac = getAudioContext();
+    if (!ac || ac.state !== "running") return;
 
-      source.buffer = buffer;
-      filter.type = "bandpass";
-      filter.frequency.setValueAtTime(frequency * pitchJitter, when);
-      filter.Q.setValueAtTime(q, when);
+    moveSoundFlip = !moveSoundFlip;
+    const now = ac.currentTime;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    const filter = ac.createBiquadFilter();
+    const volume = safeVolume(audioConfig.moveVolume, 0.035);
 
-      gain.gain.setValueAtTime(Math.max(0.0001, volume * level), when);
-      gain.gain.exponentialRampToValueAtTime(
-        0.0001,
-        when + Math.max(0.006, duration),
-      );
+    osc.type = "square";
+    osc.frequency.setValueAtTime(moveSoundFlip ? 145 : 170, now);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(520, now);
 
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(ac.destination);
-      source.start(when);
-      source.stop(when + duration);
-    };
+    gain.gain.setValueAtTime(Math.max(0.0001, volume), now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.018);
 
-    const makeKeycapBody = (when, frequency, level, duration) => {
-      const oscillator = ac.createOscillator();
-      const filter = ac.createBiquadFilter();
-      const gain = ac.createGain();
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(now);
+    osc.stop(now + 0.02);
+  }
 
-      oscillator.type = "triangle";
-      oscillator.frequency.setValueAtTime(frequency * pitchJitter, when);
-      oscillator.frequency.exponentialRampToValueAtTime(
-        frequency * 0.72 * pitchJitter,
-        when + duration,
-      );
+  function playEatSound(food) {
+    if (!audioConfig.eatEnabled) return;
+    const ac = getAudioContext();
+    if (!ac || ac.state !== "running") return;
 
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(900, when);
+    const special = food?.type === "special";
+    const volume = safeVolume(audioConfig.eatVolume, 0.20);
+    const now = ac.currentTime;
 
-      gain.gain.setValueAtTime(Math.max(0.0001, volume * level), when);
-      gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(special ? 520 : 390, now);
+    osc.frequency.exponentialRampToValueAtTime(
+      special ? 1050 : 720,
+      now + (special ? 0.11 : 0.075),
+    );
 
-      oscillator.connect(filter);
-      filter.connect(gain);
-      gain.connect(ac.destination);
-      oscillator.start(when);
-      oscillator.stop(when + duration);
-    };
+    gain.gain.setValueAtTime(Math.max(0.0001, volume), now);
+    gain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      now + (special ? 0.13 : 0.09),
+    );
 
-    // A distinct keyboard key press: sharp switch click + short keycap "clack".
-    makeNoiseClick(now, 0.014, 3400, 2.5, 0.95);
-    makeNoiseClick(now + 0.004, 0.020, 1650, 1.35, 0.48);
-    makeKeycapBody(now, 230, 0.22, 0.028);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(now);
+    osc.stop(now + (special ? 0.14 : 0.10));
 
-    // Small key-release click so it reads as a real key, not a game beep.
-    makeNoiseClick(now + 0.046, 0.012, 2450, 2.1, 0.42);
-    makeKeycapBody(now + 0.044, 170, 0.10, 0.022);
+    if (special) {
+      const sparkle = ac.createOscillator();
+      const sparkleGain = ac.createGain();
+      sparkle.type = "sine";
+      sparkle.frequency.setValueAtTime(1320, now + 0.03);
+      sparkle.frequency.exponentialRampToValueAtTime(1760, now + 0.12);
+      sparkleGain.gain.setValueAtTime(volume * 0.34, now + 0.03);
+      sparkleGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+      sparkle.connect(sparkleGain);
+      sparkleGain.connect(ac.destination);
+      sparkle.start(now + 0.03);
+      sparkle.stop(now + 0.15);
+    }
+  }
+
+  function getExplosionNoiseBuffer(ac) {
+    if (explosionNoiseBuffer) return explosionNoiseBuffer;
+
+    const duration = 0.55;
+    const frameCount = Math.floor(ac.sampleRate * duration);
+    const buffer = ac.createBuffer(1, frameCount, ac.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < frameCount; i += 1) {
+      const p = i / frameCount;
+      const envelope = Math.pow(1 - p, 2.1);
+      data[i] = (Math.random() * 2 - 1) * envelope;
+    }
+
+    explosionNoiseBuffer = buffer;
+    return buffer;
+  }
+
+  function playExplosionSound() {
+    if (!audioConfig.explosionEnabled) return;
+    const ac = getAudioContext();
+    if (!ac || ac.state !== "running") return;
+
+    const volume = safeVolume(audioConfig.explosionVolume, 0.42);
+    const now = ac.currentTime;
+
+    const noise = ac.createBufferSource();
+    const filter = ac.createBiquadFilter();
+    const noiseGain = ac.createGain();
+
+    noise.buffer = getExplosionNoiseBuffer(ac);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(1500, now);
+    filter.frequency.exponentialRampToValueAtTime(180, now + 0.48);
+    noiseGain.gain.setValueAtTime(volume, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.52);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ac.destination);
+    noise.start(now);
+    noise.stop(now + 0.55);
+
+    const boom = ac.createOscillator();
+    const boomGain = ac.createGain();
+    boom.type = "sine";
+    boom.frequency.setValueAtTime(92, now);
+    boom.frequency.exponentialRampToValueAtTime(34, now + 0.42);
+    boomGain.gain.setValueAtTime(volume * 0.85, now);
+    boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);
+    boom.connect(boomGain);
+    boomGain.connect(ac.destination);
+    boom.start(now);
+    boom.stop(now + 0.48);
   }
 
   document.addEventListener("pointerdown", unlockAudio, { passive: true });
   document.addEventListener("keydown", unlockAudio);
+  loadTurnKeyBuffer().catch(() => {});
 
   function handleEngineEvent(event) {
     if (event.type === "direction-changed") {
       playTurnKeySound();
     }
 
+    if (event.type === "moved") {
+      playMoveSound();
+    }
+
     if (event.type === "ate") {
+      playEatSound(event.food);
       const user = event.food.user;
       if (user && user !== "JOGO") {
         addContribution(user, event.food.points);
@@ -183,6 +284,7 @@
     }
 
     if (event.type === "bomb-exploded") {
+      playExplosionSound();
       explosionFlashUntil = performance.now() + 280;
       const user = event.bomb.user || "viewer";
       pushEvent(`💥 A bomba de @${user} EXPLODIU!`);
@@ -709,6 +811,10 @@
     action: processAction,
     reset: () => engine.reset(),
     keySound: playTurnKeySound,
+    moveSound: playMoveSound,
+    eatSound: () => playEatSound({ type: "normal" }),
+    specialEatSound: () => playEatSound({ type: "special" }),
+    explosionSound: playExplosionSound,
     unlockAudio,
     engine
   };
