@@ -48,6 +48,48 @@
   const contributors = new Map();
   const giftCounters = new Map();
 
+  const giftConfigStorageKey = "snake-live-gift-config-v1";
+  const giftSlots = [
+    {
+      key: "food1",
+      label: "🌹 Comida +1",
+      defaults: "rose",
+      action: { action: "food", amount: 1, label: "Comida +1", icon: "🌹" }
+    },
+    {
+      key: "food3",
+      label: "❤️ Comida +3",
+      defaults: "heart",
+      action: { action: "food", amount: 3, label: "Comida +3", icon: "❤️" }
+    },
+    {
+      key: "special",
+      label: "🍩 Especial +5",
+      defaults: "doughnut, donut",
+      action: { action: "specialFood", amount: 1, label: "Especial", icon: "🍩" }
+    },
+    {
+      key: "turbo",
+      label: "⚡ Turbo 5s",
+      defaults: "tiktok",
+      action: { action: "turbo", durationMs: 5000, label: "Turbo", icon: "⚡" }
+    },
+    {
+      key: "bomb",
+      label: "💣 Bomba",
+      defaults: "gg",
+      action: { action: "bomb", amount: 1, label: "Bomba", icon: "💣" }
+    },
+    {
+      key: "shield",
+      label: "🛡️ Escudo",
+      defaults: "crown",
+      action: { action: "shield", amount: 1, label: "Escudo", icon: "🛡️" }
+    }
+  ];
+  let giftSettings = loadGiftSettings();
+  let configuredGiftMap = buildConfiguredGiftMap(giftSettings);
+
   const engine = new window.SnakeEngine({
     ...config.board,
     onEvent: handleEngineEvent
@@ -743,8 +785,8 @@
     const giftName = String(data?.giftName || "").trim().toLowerCase();
     const giftKey = giftName.replace(/\s+/g, "");
     const mapping =
-      config.gifts[giftName] ||
-      config.gifts[giftKey] ||
+      configuredGiftMap.get(giftName) ||
+      configuredGiftMap.get(giftKey) ||
       config.fallbackByTier[data?.giftType] ||
       config.fallbackByTier.small;
 
@@ -766,6 +808,107 @@
     const action = { ...mapping };
     if (action.amount) action.amount *= repeatDelta;
     processAction(action, user);
+  }
+
+  function normalizeGiftLookup(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "");
+  }
+
+  function getDefaultGiftSettings() {
+    return Object.fromEntries(giftSlots.map((slot) => [slot.key, slot.defaults]));
+  }
+
+  function loadGiftSettings() {
+    const defaults = getDefaultGiftSettings();
+    try {
+      const saved = JSON.parse(localStorage.getItem(giftConfigStorageKey) || "null");
+      if (!saved || typeof saved !== "object") return defaults;
+      return { ...defaults, ...saved };
+    } catch {
+      return defaults;
+    }
+  }
+
+  function buildConfiguredGiftMap(settings) {
+    const map = new Map();
+
+    for (const slot of giftSlots) {
+      const names = String(settings?.[slot.key] ?? slot.defaults)
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean);
+
+      for (const name of names) {
+        const lower = name.toLowerCase();
+        map.set(lower, { ...slot.action });
+        map.set(normalizeGiftLookup(name), { ...slot.action });
+      }
+    }
+
+    return map;
+  }
+
+  function setupGiftConfigPanel() {
+    const rows = document.getElementById("giftConfigRows");
+    const saveButton = document.getElementById("saveGiftConfig");
+    const resetButton = document.getElementById("resetGiftConfig");
+    const status = document.getElementById("giftConfigStatus");
+    if (!rows || !saveButton || !resetButton) return;
+
+    const renderInputs = () => {
+      rows.innerHTML = "";
+      for (const slot of giftSlots) {
+        const row = document.createElement("div");
+        row.className = "gift-config-row";
+
+        const label = document.createElement("label");
+        label.htmlFor = `gift-${slot.key}`;
+        label.textContent = slot.label;
+
+        const input = document.createElement("input");
+        input.id = `gift-${slot.key}`;
+        input.type = "text";
+        input.autocomplete = "off";
+        input.value = giftSettings[slot.key] ?? slot.defaults;
+        input.dataset.giftSlot = slot.key;
+
+        row.append(label, input);
+        rows.appendChild(row);
+      }
+    };
+
+    saveButton.addEventListener("click", () => {
+      const next = {};
+      rows.querySelectorAll("[data-gift-slot]").forEach((input) => {
+        next[input.dataset.giftSlot] = input.value.trim();
+      });
+
+      giftSettings = { ...getDefaultGiftSettings(), ...next };
+      configuredGiftMap = buildConfiguredGiftMap(giftSettings);
+      localStorage.setItem(giftConfigStorageKey, JSON.stringify(giftSettings));
+      status.textContent = "✓ Presentes salvos e ativos.";
+      clearTimeout(setupGiftConfigPanel.statusTimer);
+      setupGiftConfigPanel.statusTimer = setTimeout(() => {
+        status.textContent = "";
+      }, 2600);
+    });
+
+    resetButton.addEventListener("click", () => {
+      localStorage.removeItem(giftConfigStorageKey);
+      giftSettings = getDefaultGiftSettings();
+      configuredGiftMap = buildConfiguredGiftMap(giftSettings);
+      renderInputs();
+      status.textContent = "↻ Configuração padrão restaurada.";
+      clearTimeout(setupGiftConfigPanel.statusTimer);
+      setupGiftConfigPanel.statusTimer = setTimeout(() => {
+        status.textContent = "";
+      }, 2600);
+    });
+
+    renderInputs();
   }
 
   function normalizeUser(value) {
@@ -821,6 +964,7 @@
 
   function setupTestPanel() {
     if (!isTestMode) return;
+    setupGiftConfigPanel();
     const buttons = document.getElementById("testButtons");
     const userInput = document.getElementById("testUser");
 
