@@ -61,7 +61,8 @@ body { display: grid; place-items: center; }
 .hud-card span { display: block; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .05em; }
 .hud-card strong { display: block; margin-top: 2px; font-size: 19px; line-height: 1; color: var(--green); }
 .game-frame {
-  position: absolute; z-index: 4; top: 15.2%; left: 9%; right: 9%; height: 54.5%;
+  position: absolute; z-index: 4; top: 15.2%; left: 4%; right: 4%;
+  aspect-ratio: 1 / 1;
   padding: 8px; border-radius: 22px;
   background: linear-gradient(180deg, rgba(38,255,124,.13), rgba(15,74,46,.08));
   border: 1px solid rgba(88,255,130,.30);
@@ -72,7 +73,7 @@ body { display: grid; place-items: center; }
   background: #06100d;
 }
 .status-strip {
-  position: absolute; z-index: 7; top: 71.2%; left: 4%; right: 4%;
+  position: absolute; z-index: 7; top: 63.2%; left: 4%; right: 4%;
   min-height: 38px; display: flex; align-items: center; justify-content: center;
   padding: 8px 12px; border-radius: 12px; text-align: center;
   background: rgba(4,12,13,.87); border: 1px solid rgba(88,255,130,.22);
@@ -149,6 +150,13 @@ body.test-mode .test-panel { display: block; }
 .gift-config h3 { margin: 0; font-size: 13px; }
 .gift-config-head span { font-size: 8px; color: #7f93a8; }
 .gift-config > p { margin: 0 0 9px; line-height: 1.35; }
+.gift-config-columns {
+  display: grid; grid-template-columns: 90px 1fr; gap: 7px;
+  margin: 0 0 5px; padding: 0 2px;
+}
+.gift-config-columns span {
+  font-size: 7px; font-weight: 900; letter-spacing: .06em; color: #6f8398;
+}
 .gift-config-rows { display: grid; gap: 7px; }
 .gift-config-row {
   display: grid; grid-template-columns: 90px 1fr; gap: 7px; align-items: center;
