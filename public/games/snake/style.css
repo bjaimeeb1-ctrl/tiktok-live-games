@@ -150,6 +150,12 @@ body.test-mode .test-panel { display: block; }
 .gift-config h3 { margin: 0; font-size: 13px; }
 .gift-config-head span { font-size: 8px; color: #7f93a8; }
 .gift-config > p { margin: 0 0 9px; line-height: 1.35; }
+.gift-library-status {
+  min-height: 18px; margin: -2px 0 7px; padding: 5px 7px; border-radius: 7px;
+  background: rgba(37,229,255,.06); color: #a9dce5; font-size: 8.5px; line-height: 1.25;
+}
+.gift-library-status.ready { color: #bfffd0; background: rgba(88,255,130,.06); }
+.gift-library-status.error { color: #ffd4a3; background: rgba(255,174,72,.08); }
 .gift-config-columns {
   display: grid; grid-template-columns: 90px 1fr; gap: 7px;
   margin: 0 0 5px; padding: 0 2px;
@@ -164,9 +170,13 @@ body.test-mode .test-panel { display: block; }
 .gift-config-row label {
   font-size: 9px; font-weight: 800; color: #dce8f6; line-height: 1.15;
 }
-.gift-config-row input {
-  margin: 0; height: 32px; font-size: 10px;
+.gift-config-row input,
+.gift-config-row select {
+  width: 100%; margin: 0; height: 34px; border-radius: 9px;
+  border: 1px solid #33445c; background: #080e17; color: #fff;
+  padding: 0 8px; font-size: 9.5px;
 }
+.gift-config-row select { cursor: pointer; }
 .gift-config-actions {
   display: grid; grid-template-columns: 1fr 72px; gap: 7px; margin-top: 9px;
 }
