@@ -48,43 +48,43 @@
   const contributors = new Map();
   const giftCounters = new Map();
 
-  const giftConfigStorageKey = "snake-live-gift-config-v1";
-  const giftIdConfigStorageKey = "snake-live-gift-id-config-v1";
+  const giftConfigStorageKey = "snake-live-gift-config-v2-br";
+  const giftIdConfigStorageKey = "snake-live-gift-id-config-v2-br";
   const giftSlots = [
     {
       key: "food1",
       label: "🌹 Comida +1",
-      defaults: "rose",
+      defaults: "",
       action: { action: "food", amount: 1, label: "Comida +1", icon: "🌹" }
     },
     {
       key: "food3",
       label: "❤️ Comida +3",
-      defaults: "heart",
+      defaults: "",
       action: { action: "food", amount: 3, label: "Comida +3", icon: "❤️" }
     },
     {
       key: "special",
       label: "🍩 Especial +5",
-      defaults: "doughnut, donut",
+      defaults: "",
       action: { action: "specialFood", amount: 1, label: "Especial", icon: "🍩" }
     },
     {
       key: "turbo",
       label: "⚡ Turbo 5s",
-      defaults: "tiktok",
+      defaults: "",
       action: { action: "turbo", durationMs: 5000, label: "Turbo", icon: "⚡" }
     },
     {
       key: "bomb",
       label: "💣 Bomba",
-      defaults: "gg",
+      defaults: "",
       action: { action: "bomb", amount: 1, label: "Bomba", icon: "💣" }
     },
     {
       key: "shield",
       label: "🛡️ Escudo",
-      defaults: "crown",
+      defaults: "",
       action: { action: "shield", amount: 1, label: "Escudo", icon: "🛡️" }
     }
   ];
@@ -932,40 +932,11 @@
           select.appendChild(option);
         }
 
-        if (selectedName && !selectedMatched) {
-          const legacy = document.createElement("option");
-          legacy.value = selectedName;
-          legacy.textContent = `${selectedName} — configuração atual`;
-          legacy.selected = true;
-          select.appendChild(legacy);
-        }
-
         row.append(label, select);
         rows.appendChild(row);
       }
     };
 
-    const renderFallbackInputs = () => {
-      rows.innerHTML = "";
-      for (const slot of giftSlots) {
-        const row = document.createElement("div");
-        row.className = "gift-config-row";
-
-        const label = document.createElement("label");
-        label.htmlFor = `gift-${slot.key}`;
-        label.textContent = slot.label;
-
-        const input = document.createElement("input");
-        input.id = `gift-${slot.key}`;
-        input.type = "text";
-        input.autocomplete = "off";
-        input.value = firstConfiguredName(slot);
-        input.dataset.giftSlot = slot.key;
-
-        row.append(label, input);
-        rows.appendChild(row);
-      }
-    };
 
     saveButton.addEventListener("click", () => {
       const next = {};
@@ -999,7 +970,7 @@
       configuredGiftMap = buildConfiguredGiftMap(giftSettings, giftIdSettings);
 
       if (giftLibrary.length) renderSelects();
-      else renderFallbackInputs();
+      else rows.innerHTML = "";
 
       status.textContent = "↻ Configuração padrão restaurada.";
       clearTimeout(setupGiftConfigPanel.statusTimer);
@@ -1056,12 +1027,13 @@
         libraryStatus.classList.add("ready");
       }
     } catch (error) {
-      console.warn("[SnakeGiftConfig] Biblioteca indisponível:", error);
-      renderFallbackInputs();
+      console.warn("[SnakeGiftConfig] Biblioteca Brasil indisponível:", error);
+      rows.innerHTML = "";
+      saveButton.disabled = true;
 
       if (libraryStatus) {
         libraryStatus.textContent =
-          "Biblioteca indisponível. Você ainda pode informar o nome manualmente.";
+          "Não foi possível carregar os presentes do Brasil. Nenhum catálogo global ou entrada manual será usado.";
         libraryStatus.classList.remove("ready");
         libraryStatus.classList.add("error");
       }
