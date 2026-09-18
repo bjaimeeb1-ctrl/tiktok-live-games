@@ -191,7 +191,7 @@ async function fetchEulerGiftCatalog() {
   // are offered by the Snake gift configurator.
   const regionalEndpoint = new URL("/webcast/gifts", EULER_API_BASE);
   regionalEndpoint.searchParams.set("region", "BR");
-  regionalEndpoint.searchParams.set("webcast_language", "pt");
+  regionalEndpoint.searchParams.set("webcast_language", "en");
   regionalEndpoint.searchParams.set("redirect", "false");
 
   const headers = {
@@ -206,10 +206,11 @@ async function fetchEulerGiftCatalog() {
   );
 
   if (!signedResponse.ok) {
+    const details = JSON.stringify(signedPayload || {});
     const message =
       signedPayload?.message ||
       `Euler Brazil gifts request failed with HTTP ${signedResponse.status}`;
-    throw new Error(message);
+    throw new Error(`${message} | response=${details}`);
   }
 
   // Euler returns the signed TikTok URL for the selected region.
