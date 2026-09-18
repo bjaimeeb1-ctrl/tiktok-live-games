@@ -54,42 +54,42 @@
     {
       key: "food1",
       label: "🌹 Comida +1",
-      screenEffect: "🍎 +1 comida",
+      screenEffect: "Comida +1",
       defaults: "",
       action: { action: "food", amount: 1, label: "Comida +1", icon: "🌹" }
     },
     {
       key: "food3",
       label: "❤️ Comida +3",
-      screenEffect: "🍎 +3 comidas",
+      screenEffect: "Comida +3",
       defaults: "",
       action: { action: "food", amount: 3, label: "Comida +3", icon: "❤️" }
     },
     {
       key: "special",
       label: "🍩 Especial +5",
-      screenEffect: "⭐ Comida especial",
+      screenEffect: "Especial +5",
       defaults: "",
       action: { action: "specialFood", amount: 1, label: "Especial", icon: "🍩" }
     },
     {
       key: "turbo",
       label: "⚡ Turbo 5s",
-      screenEffect: "⚡ Turbo por 5s",
+      screenEffect: "Turbo 5s",
       defaults: "",
       action: { action: "turbo", durationMs: 5000, label: "Turbo", icon: "⚡" }
     },
     {
       key: "bomb",
       label: "💣 Bomba",
-      screenEffect: "💣 Lança uma bomba",
+      screenEffect: "Bomba",
       defaults: "",
       action: { action: "bomb", amount: 1, label: "Bomba", icon: "💣" }
     },
     {
       key: "shield",
       label: "🛡️ Escudo",
-      screenEffect: "🛡️ Dá um escudo",
+      screenEffect: "Escudo",
       defaults: "",
       action: { action: "shield", amount: 1, label: "Escudo", icon: "🛡️" }
     }
@@ -916,9 +916,7 @@
         return `<div class="gift-action-card">
           ${visual}
           <div class="gift-action-copy">
-            <div class="gift-action-name">${escapeHtml(displayName)}</div>
-            ${cost > 0 ? `<div class="gift-action-cost">${cost} moeda${cost === 1 ? "" : "s"}</div>` : ""}
-            <div class="gift-action-effect">${escapeHtml(slot.label)}</div>
+            <div class="gift-action-effect">= ${escapeHtml(slot.screenEffect)}</div>
           </div>
         </div>`;
       })
