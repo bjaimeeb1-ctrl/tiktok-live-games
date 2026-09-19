@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cobrinha da Live - TikTok Live Games</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="snake-live">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-icon">🐍</div>
+          <div>
+            <strong>Cobrinha da Live</strong>
+            <small>Clássico por dentro. LIVE por fora.</small>
+          </div>
+        </div>
+        <div id="connectionStatus" class="connection offline">MODO LOCAL</div>
+      </header>
+
+      <section class="hud" aria-label="Placar">
+        <div class="hud-card"><span>PONTOS</span><strong id="score">0</strong></div>
+        <div class="hud-card"><span>NÍVEL</span><strong id="level">1</strong></div>
+        <div class="hud-card"><span>RECORDE</span><strong id="record">0</strong></div>
+      </section>
+
+      <div class="power-badges">
+        <div id="turboBadge" class="badge turbo">⚡ TURBO</div>
+        <div id="shieldBadge" class="badge shield">🛡️ ESCUDO <span id="shieldCount">0</span></div>
+      </div>
+
+      <section class="game-frame">
+        <canvas id="gameCanvas" width="660" height="660" aria-label="Jogo da cobrinha"></canvas>
+      </section>
+
+      <section class="gift-actions-panel" aria-label="Presentes e ações">
+        <div class="gift-actions-title">🎁 PRESENTES E AÇÕES</div>
+        <div id="giftActionLegend" class="gift-action-grid"></div>
+      </section>
+
+      <section class="bottom-area">
+        <div class="leaderboard">
+          <div class="panel-title">🏆 TOP DA LIVE</div>
+          <div id="leaderboard"></div>
+        </div>
+      </section>
+
+      <div id="gameOver" class="gameover">
+        <div class="gameover-card">
+          <div>💥 FIM DE JOGO</div>
+          <div id="finalScore" class="big">0</div>
+          <p id="recordMessage">Pontuação da partida</p>
+          <div class="restart">Nova partida em instantes...</div>
+        </div>
+      </div>
+    </main>
+
+    <aside id="testPanel" class="test-panel">
+      <h2>Modo teste</h2>
+      <p>Simule presentes sem gastar moedas.</p>
+      <input id="testUser" value="jaime" maxlength="24" aria-label="Usuário de teste" />
+      <div id="testButtons" class="test-buttons"></div>
+      <button id="testReset" class="test-reset" type="button">↻ Reiniciar partida</button>
+
+      <div class="gift-config">
+        <div class="gift-config-head">
+          <h3>🎁 Configurar presentes</h3>
+          <span>Salva neste navegador</span>
+        </div>
+        <p>Escolha somente entre os presentes disponíveis no TikTok LIVE Brasil.</p>
+        <div id="giftLibraryStatus" class="gift-library-status">Carregando presentes disponíveis no Brasil...</div>
+        <div class="gift-config-columns"><span>AÇÃO</span><span>PRESENTE DO TIKTOK</span></div>
+        <div id="giftConfigRows" class="gift-config-rows"></div>
+        <div class="gift-config-actions">
+          <button id="saveGiftConfig" class="gift-save" type="button">Salvar presentes</button>
+          <button id="resetGiftConfig" class="gift-defaults" type="button">Padrão</button>
+        </div>
+        <div id="giftConfigStatus" class="gift-config-status" aria-live="polite"></div>
+      </div>
+    </aside>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/lib/tiktok-bridge.js"></script>
+    <script src="config.js"></script>
+    <script src="sound-assets.js"></script>
+    <script src="snake-engine.js"></script>
+    <script src="snake-engine-safe.js"></script>
+    <script src="game.js"></script>
+    <script src="turbo-effects.js"></script>
+    <script src="shield-effects.js"></script>
+    <script src="special-food-effects.js"></script>
+    <script src="normal-food-effects.js"></script>
+  </body>
+</html>

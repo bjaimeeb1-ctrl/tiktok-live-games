@@ -33,3 +33,6 @@ build/
 .opencode/*
 .opencode.*
 .beads/*
+
+# Local TikTok launcher account
+.snake-user.txt

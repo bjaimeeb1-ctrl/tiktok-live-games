@@ -25,6 +25,7 @@
 				error: [],
 			};
 			this.isInitialized = false;
+			this.tiktokConnected = false;
 
 			// Auto-connect if URL params are present (id or username)
 			window.addEventListener("load", () => {
@@ -55,7 +56,18 @@
 
 			this.socket.on("room-joined", (data) => {
 				console.log(`[TikTokBridge] Joined room: ${data.room}`);
-				this._dispatch("connected", data);
+				if (!this.tiktokConnected) {
+					this.tiktokConnected = true;
+					this._dispatch("connected", data);
+				}
+			});
+
+			this.socket.on("tiktok_connected", (data) => {
+				console.log("[TikTokBridge] TikTok LIVE confirmed");
+				if (!this.tiktokConnected) {
+					this.tiktokConnected = true;
+					this._dispatch("connected", data);
+				}
 			});
 
 			// Event relay — canonical events only (no legacy duplicates)
@@ -64,15 +76,17 @@
 			this.socket.on("tiktok_like", (data) => this._dispatch("like", data));
 			this.socket.on("tiktok_share", (data) => this._dispatch("share", data));
 
-			this.socket.on("tiktok_disconnected", () => {
+			this.socket.on("tiktok_disconnected", (data) => {
 				console.log("[TikTokBridge] TikTok disconnected");
-				this._dispatch("disconnected");
+				this.tiktokConnected = false;
+				this._dispatch("disconnected", data);
 			});
 
 			this.socket.on("tiktok_reconnecting", (data) => {
 				console.log(
 					`[TikTokBridge] Reconnecting attempt ${data.attempt} in ${data.delayMs}ms`,
 				);
+				this.tiktokConnected = false;
 				this._dispatch("reconnecting", data);
 			});
 
@@ -83,6 +97,7 @@
 
 			this.socket.on("connection-error", (err) => {
 				console.error("[TikTokBridge] Connection error:", err.message);
+				this.tiktokConnected = false;
 				this._dispatch("error", err);
 			});
 

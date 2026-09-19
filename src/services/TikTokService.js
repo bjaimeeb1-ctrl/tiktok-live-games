@@ -1,350 +1,401 @@
 /**
  * TikTokService.js
- * Manages TikTok Live connections for multiple streamers (Multi-tenant)
+ * Manages TikTok LIVE connections for multiple streamers.
  *
- * IMPORTANT - DATA ISOLATION:
- * - Each streamer has their own Socket.io Room (Room ID = username)
- * - Data from Streamer A will NEVER be sent to Streamer B
- * - Uses io.to(username).emit() to send to the CORRECT room only
- *
- * @module services/TikTokService
+ * Primary transport: Euler Stream serverless WebSocket API.
  */
 
-import { WebcastPushConnection } from "tiktok-live-connector";
 import {
-	normalizeChat,
-	normalizeGift,
-	normalizeLike,
-	normalizeShare,
+  normalizeChat,
+  normalizeGift,
+  normalizeLike,
+  normalizeShare,
 } from "../lib/tiktokEventNormalizer.js";
 import { getDelay, shouldRetry, sleep } from "../lib/tiktokReconnectPolicy.js";
 
+const EULER_WS_URL = "wss://ws.eulerstream.com";
+const EULER_LIVE_VALIDATION_MS = 1000;
+const EULER_OFFLINE_RETRY_MS = 15000;
+const EULER_OFFLINE_MAX_RETRIES = 20;
+
 class TikTokService {
-	constructor() {
-		// Singleton pattern - ensure only one instance exists
-		if (TikTokService.instance) {
-			return TikTokService.instance;
-		}
-		TikTokService.instance = this;
+  constructor() {
+    if (TikTokService.instance) return TikTokService.instance;
+    TikTokService.instance = this;
 
-		/**
-		 * Map storing active TikTok connections
-		 * @type {Map<string, {connection: WebcastPushConnection, lastActivity: number}>}
-		 */
-		this.connections = new Map();
+    this.connections = new Map();
+    this.roomClients = new Map();
+    this.reconnectState = new Map();
 
-		/**
-		 * Map tracking client count per room
-		 * @type {Map<string, number>}
-		 */
-		this.roomClients = new Map();
+    this.cleanupInterval = setInterval(
+      () => this.checkInactiveConnections(),
+      60000,
+    );
+  }
 
-		/**
-		 * Track reconnect state per username to avoid overlapping retries
-		 * @type {Map<string, {attempting: boolean, attempt: number}>}
-		 */
-		this.reconnectState = new Map();
+  async connect(username, io, options = {}) {
+    if (this.connections.has(username)) {
+      console.log(`[TikTokService] Reusing existing connection for: ${username}`);
+      const existing = this.connections.get(username);
+      existing.lastActivity = Date.now();
+      return true;
+    }
 
-		// Cleanup interval - check for inactive connections every minute
-		this.cleanupInterval = setInterval(
-			() => this.checkInactiveConnections(),
-			60000,
-		);
-	}
+    const apiKey = process.env.EULER_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'EULER_API_KEY não foi definida. No PowerShell use: $env:EULER_API_KEY="SUA_CHAVE"',
+      );
+    }
 
-	/**
-	 * Connect to a streamer's TikTok Live
-	 * IMPORTANT: If connection exists, reuse it. Do NOT create new one.
-	 *
-	 * @param {string} username - TikTok username (also used as Room ID)
-	 * @param {import('socket.io').Server} io - Socket.io server instance
-	 * @returns {Promise<boolean>} - Whether connection was successful
-	 */
-	async connect(username, io) {
-		// Check if connection already exists
-		if (this.connections.has(username)) {
-			console.log(
-				`[TikTokService] Reusing existing connection for: ${username}`,
-			);
-			const existing = this.connections.get(username);
-			existing.lastActivity = Date.now();
-			return true;
-		}
+    if (typeof WebSocket === "undefined") {
+      throw new Error("WebSocket global indisponível. Use Node.js 22 ou superior.");
+    }
 
-		console.log(`[TikTokService] Creating new connection for: ${username}`);
+    console.log(`[TikTokService] Connecting via Euler WebSocket: ${username}`);
 
-		try {
-			// Create new TikTok Live connection
-			const connection = new WebcastPushConnection(username, {
-				processInitialData: true,
-				enableExtendedGiftInfo: true,
-				enableWebsocketUpgrade: true,
-				requestPollingIntervalMs: 2000,
-				sessionId: null,
-			});
+    const params = new URLSearchParams({
+      uniqueId: username,
+      apiKey,
+      schemaVersion: "v1",
+      "features.bundleEvents": "true",
+      "features.rawMessages": "false",
+      "features.normalizeUniqueId": "true",
+    });
 
-			// Store in Map
-			this.connections.set(username, {
-				connection: connection,
-				lastActivity: Date.now(),
-			});
+    const ws = new WebSocket(`${EULER_WS_URL}?${params.toString()}`);
 
-			// Reset reconnect state on fresh connect
-			this.reconnectState.delete(username);
+    this.connections.set(username, {
+      connection: ws,
+      lastActivity: Date.now(),
+      transport: "euler-websocket",
+    });
+    this.reconnectState.delete(username);
 
-			// ==========================================
-			// TIKTOK EVENT HANDLERS
-			// All events use normalizers from tiktokEventNormalizer.js
-			// ==========================================
+    let manuallyClosed = false;
+    let liveConfirmed = false;
 
-			/** Handle Chat Messages */
-			connection.on("chat", (data) => {
-				this.updateActivity(username);
-				const payload = normalizeChat(data);
-				io.to(username).emit("tiktok_chat", payload);
-			});
+    ws.addEventListener("open", () => {
+      this.updateActivity(username);
+      console.log(
+        `[TikTokService] Euler socket opened for ${username}; validating LIVE...`,
+      );
+    });
 
-			/** Handle Like Events */
-			connection.on("like", (data) => {
-				this.updateActivity(username);
-				const payload = normalizeLike(data);
-				io.to(username).emit("tiktok_like", payload);
-				console.log(
-					`[${username}] Like: ${payload.likeCount} from ${payload.user.nickname}`,
-				);
-			});
+    ws.addEventListener("message", async (event) => {
+      this.updateActivity(username);
 
-			/** Handle Share Events */
-			connection.on("social", (data) => {
-				if (data.displayType === "pm_mt_msg_viewer_share") {
-					this.updateActivity(username);
-					const payload = normalizeShare(data);
-					io.to(username).emit("tiktok_share", payload);
-					console.log(`[${username}] Share from ${payload.user.nickname}`);
-				}
-			});
+      try {
+        const text = await this._webSocketDataToText(event.data);
+        const payload = JSON.parse(text);
+        const messages = Array.isArray(payload?.messages)
+          ? payload.messages
+          : Array.isArray(payload)
+            ? payload
+            : [payload];
 
-			/** Handle Gift Events — single canonical emit, no legacy duplication */
-			connection.on("gift", (data) => {
-				this.updateActivity(username);
-				const payload = normalizeGift(data);
-				io.to(username).emit("tiktok_gift", payload);
-				console.log(
-					`[${username}] Gift: ${payload.giftName} x${payload.repeatCount} (${payload.giftType}, ${payload.giftValue}💎)`,
-				);
-			});
+        for (const message of messages) {
+          this._relayEulerMessage(username, message, io);
+        }
+      } catch (error) {
+        console.error(
+          `[TikTokService] Failed to parse Euler message for ${username}:`,
+          error?.message || error,
+        );
+      }
+    });
 
-			// ==========================================
-			// CONNECTION STATUS HANDLERS
-			// ==========================================
-			connection.on("connected", (state) => {
-				console.log(`[TikTokService] Connected to live: ${username}`);
-				io.to(username).emit("tiktok_connected", {
-					roomId: state.roomId,
-					timestamp: Date.now(),
-				});
-			});
+    ws.addEventListener("error", (event) => {
+      const message = event?.message || "Euler WebSocket connection error";
+      console.error(`[TikTokService] Euler error for ${username}: ${message}`);
+      io.to(username).emit("tiktok_error", {
+        message,
+        timestamp: Date.now(),
+      });
+    });
 
-			connection.on("disconnected", () => {
-				console.log(`[TikTokService] Disconnected from: ${username}`);
-				this.connections.delete(username);
-				io.to(username).emit("tiktok_disconnected", {
-					timestamp: Date.now(),
-				});
+    ws.addEventListener("close", (event) => {
+      const code = Number(event?.code || 0);
+      const reason = event?.reason || this._closeReason(code);
+      console.log(
+        `[TikTokService] Euler WebSocket closed for ${username}: code=${code} reason=${reason || "unknown"}`,
+      );
 
-				// Auto-reconnect if there are still clients in the room
-				const clientCount = this.getClientCount(username);
-				if (clientCount > 0) {
-					this._scheduleReconnect(username, io);
-				}
-			});
+      const current = this.connections.get(username);
+      if (current?.connection === ws) {
+        this.connections.delete(username);
+      }
 
-			connection.on("error", (err) => {
-				console.error(`[TikTokService] Error for ${username}:`, err.message);
-				io.to(username).emit("tiktok_error", {
-					message: err.message,
-					timestamp: Date.now(),
-				});
-			});
+      io.to(username).emit("tiktok_disconnected", {
+        code,
+        reason,
+        timestamp: Date.now(),
+      });
 
-			// Establish connection
-			await connection.connect();
-			return true;
-		} catch (error) {
-			console.error(
-				`[TikTokService] Cannot connect to ${username}:`,
-				error.message,
-			);
-			this.connections.delete(username);
-			return false;
-		}
-	}
+      if (
+        !manuallyClosed &&
+        options.scheduleOnClose !== false &&
+        code !== 1000 &&
+        code !== 4005 &&
+        this.getClientCount(username) > 0
+      ) {
+        this._scheduleReconnect(username, io, { offline: code === 4404 });
+      }
+    });
 
-	/**
-	 * Schedule auto-reconnect with exponential backoff.
-	 * Skips if a reconnect loop is already running for this username.
-	 *
-	 * @param {string} username
-	 * @param {import('socket.io').Server} io
-	 * @private
-	 */
-	async _scheduleReconnect(username, io) {
-		// Guard against overlapping reconnect loops
-		const state = this.reconnectState.get(username);
-		if (state?.attempting) return;
+    try {
+      await new Promise((resolve, reject) => {
+        let validationTimer = null;
 
-		let attempt = 0;
-		this.reconnectState.set(username, { attempting: true, attempt });
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error("Timeout ao conectar ao Euler WebSocket."));
+        }, 15000);
 
-		while (shouldRetry(attempt)) {
-			// Bail if no clients remain (nobody watching → no point reconnecting)
-			if (this.getClientCount(username) === 0) {
-				console.log(
-					`[TikTokService] Reconnect aborted for ${username}: 0 clients`,
-				);
-				break;
-			}
+        const onOpen = () => {
+          validationTimer = setTimeout(() => {
+            liveConfirmed = true;
+            clearTimeout(timeout);
+            cleanup();
+            resolve();
+          }, EULER_LIVE_VALIDATION_MS);
+        };
 
-			// Bail if connection was re-established elsewhere
-			if (this.connections.has(username)) {
-				console.log(
-					`[TikTokService] Reconnect aborted for ${username}: already connected`,
-				);
-				break;
-			}
+        const onClose = (event) => {
+          clearTimeout(timeout);
+          if (validationTimer) clearTimeout(validationTimer);
+          cleanup();
+          const code = Number(event?.code || 0);
+          reject(
+            new Error(
+              `Euler WebSocket recusou a conexão (${code}): ${event?.reason || this._closeReason(code) || "sem motivo"}`,
+            ),
+          );
+        };
 
-			const delay = getDelay(attempt);
-			console.log(
-				`[TikTokService] Reconnect attempt ${attempt + 1} for ${username} in ${delay}ms`,
-			);
-			io.to(username).emit("tiktok_reconnecting", {
-				attempt: attempt + 1,
-				delayMs: delay,
-				timestamp: Date.now(),
-			});
+        const cleanup = () => {
+          ws.removeEventListener("open", onOpen);
+          ws.removeEventListener("close", onClose);
+        };
 
-			await sleep(delay);
+        ws.addEventListener("open", onOpen);
+        ws.addEventListener("close", onClose);
+      });
 
-			const ok = await this.connect(username, io);
-			if (ok) {
-				console.log(
-					`[TikTokService] Reconnected to ${username} on attempt ${attempt + 1}`,
-				);
-				this.reconnectState.delete(username);
-				return;
-			}
+      this.updateActivity(username);
+      console.log(`[TikTokService] LIVE confirmed via Euler: ${username}`);
+      io.to(username).emit("tiktok_connected", {
+        roomId: null,
+        timestamp: Date.now(),
+        transport: "euler-websocket",
+      });
 
-			attempt++;
-			this.reconnectState.set(username, { attempting: true, attempt });
-		}
+      return true;
+    } catch (error) {
+      manuallyClosed = true;
+      const current = this.connections.get(username);
+      if (current?.connection === ws) this.connections.delete(username);
+      try { ws.close(); } catch {}
+      throw error;
+    }
+  }
 
-		console.error(
-			`[TikTokService] Reconnect failed for ${username} after ${attempt} attempts`,
-		);
-		io.to(username).emit("tiktok_error", {
-			message: `Reconnect failed after ${attempt} attempts. Streamer may have ended the live.`,
-			timestamp: Date.now(),
-		});
-		this.reconnectState.delete(username);
-	}
+  _relayEulerMessage(username, message, io) {
+    if (!message || typeof message !== "object") return;
 
-	/**
-	 * Disconnect a streamer's TikTok connection
-	 * @param {string} username - TikTok username
-	 */
-	disconnect(username) {
-		// Cancel any pending reconnect
-		this.reconnectState.delete(username);
+    const method = String(
+      message.method || message.type || message.event || message.name || "",
+    );
+    const data = message.data ?? message.payload ?? message;
+    const methodLower = method.toLowerCase();
 
-		if (this.connections.has(username)) {
-			const { connection } = this.connections.get(username);
-			try {
-				connection.disconnect();
-			} catch (e) {
-				// Ignore disconnect errors
-			}
-			this.connections.delete(username);
-			console.log(`[TikTokService] Disconnected: ${username}`);
-		}
-	}
+    if (methodLower.includes("chat")) {
+      const payload = normalizeChat(data);
+      if (!payload.comment) return;
+      io.to(username).emit("tiktok_chat", payload);
+      console.log(`[${username}] Chat: ${payload.user.nickname}: ${payload.comment}`);
+      return;
+    }
 
-	/**
-	 * Update last activity timestamp for a connection
-	 * @param {string} username - TikTok username
-	 */
-	updateActivity(username) {
-		if (this.connections.has(username)) {
-			this.connections.get(username).lastActivity = Date.now();
-		}
-	}
+    if (methodLower.includes("gift")) {
+      const payload = normalizeGift(data);
+      io.to(username).emit("tiktok_gift", payload);
+      console.log(
+        `[${username}] Gift: ${payload.giftName} x${payload.repeatCount} (${payload.giftType}, ${payload.giftValue}💎)`,
+      );
+      return;
+    }
 
-	/**
-	 * Add a client to a room's count
-	 * @param {string} username - Room ID (username)
-	 */
-	addClientToRoom(username) {
-		const count = this.roomClients.get(username) || 0;
-		this.roomClients.set(username, count + 1);
-		console.log(`[TikTokService] Room ${username}: ${count + 1} clients`);
-	}
+    if (methodLower.includes("like")) {
+      const payload = normalizeLike(data);
+      io.to(username).emit("tiktok_like", payload);
+      console.log(`[${username}] Like: ${payload.likeCount} from ${payload.user.nickname}`);
+      return;
+    }
 
-	/**
-	 * Remove a client from a room's count
-	 * @param {string} username - Room ID (username)
-	 */
-	removeClientFromRoom(username) {
-		const count = this.roomClients.get(username) || 0;
-		if (count > 0) {
-			this.roomClients.set(username, count - 1);
-			console.log(`[TikTokService] Room ${username}: ${count - 1} clients`);
-		}
-	}
+    const displayType = String(data?.displayType || data?.display_type || "").toLowerCase();
+    const isShare =
+      methodLower.includes("share") ||
+      (methodLower.includes("social") && displayType.includes("share"));
 
-	/**
-	 * Get client count for a room
-	 * @param {string} username - Room ID
-	 * @returns {number} Number of clients
-	 */
-	getClientCount(username) {
-		return this.roomClients.get(username) || 0;
-	}
+    if (isShare) {
+      const payload = normalizeShare(data);
+      io.to(username).emit("tiktok_share", payload);
+      console.log(`[${username}] Share from ${payload.user.nickname}`);
+    }
+  }
 
-	/**
-	 * Check and disconnect inactive connections
-	 * AUTO-DISCONNECT after 5 minutes with no clients in room
-	 * This helps free up server resources
-	 */
-	checkInactiveConnections() {
-		const TIMEOUT = 5 * 60 * 1000; // 5 minutes
-		const now = Date.now();
+  async _webSocketDataToText(data) {
+    if (typeof data === "string") return data;
+    if (typeof Blob !== "undefined" && data instanceof Blob) return data.text();
+    if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
+    if (ArrayBuffer.isView(data)) {
+      return new TextDecoder().decode(
+        new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+      );
+    }
+    return String(data);
+  }
 
-		for (const [username, data] of this.connections.entries()) {
-			const clientCount = this.getClientCount(username);
-			const timeSinceActivity = now - data.lastActivity;
+  _closeReason(code) {
+    const reasons = {
+      1000: "normal closure",
+      4005: "LIVE encerrada",
+      4006: "timeout sem mensagens",
+      4400: "opções inválidas",
+      4401: "API key inválida",
+      4403: "sem permissão para esta conexão",
+      4404: "usuário não está ao vivo",
+      4429: "limite de conexões simultâneas atingido",
+      4500: "TikTok fechou a conexão",
+      4555: "tempo máximo da conexão atingido",
+      4556: "falha ao buscar webcast",
+      4557: "falha ao buscar dados da sala",
+    };
+    return reasons[code] || "";
+  }
 
-			if (clientCount === 0 && timeSinceActivity > TIMEOUT) {
-				console.log(
-					`[TikTokService] Auto-disconnect ${username} (inactive ${Math.round(
-						timeSinceActivity / 1000,
-					)}s, 0 clients)`,
-				);
-				this.disconnect(username);
-			}
-		}
-	}
+  async _scheduleReconnect(username, io, options = {}) {
+    const state = this.reconnectState.get(username);
+    if (state?.attempting) return;
 
-	/**
-	 * Get current service statistics
-	 * @returns {{activeConnections: number, connections: string[], rooms: Object}}
-	 */
-	getStats() {
-		return {
-			activeConnections: this.connections.size,
-			connections: Array.from(this.connections.keys()),
-			rooms: Object.fromEntries(this.roomClients),
-		};
-	}
+    let attempt = 0;
+    let offline = Boolean(options.offline);
+    this.reconnectState.set(username, { attempting: true, attempt, offline });
+
+    while (
+      shouldRetry(
+        attempt,
+        offline ? { maxRetries: EULER_OFFLINE_MAX_RETRIES } : {},
+      )
+    ) {
+      if (this.getClientCount(username) === 0) break;
+      if (this.connections.has(username)) break;
+
+      const delay = offline
+        ? EULER_OFFLINE_RETRY_MS
+        : getDelay(attempt);
+
+      console.log(
+        `[TikTokService] Reconnect attempt ${attempt + 1} for ${username} in ${delay}ms${offline ? " (aguardando LIVE)" : ""}`,
+      );
+      io.to(username).emit("tiktok_reconnecting", {
+        attempt: attempt + 1,
+        delayMs: delay,
+        offline,
+        timestamp: Date.now(),
+      });
+
+      await sleep(delay);
+
+      try {
+        await this.connect(username, io, { scheduleOnClose: false });
+        console.log(
+          `[TikTokService] Reconnected to ${username} on attempt ${attempt + 1}`,
+        );
+        this.reconnectState.delete(username);
+        return;
+      } catch (error) {
+        const message = String(error?.message || error);
+        if (message.includes("(4404)") || /not currently live/i.test(message)) {
+          offline = true;
+        }
+        console.error(
+          `[TikTokService] Reconnect attempt ${attempt + 1} failed for ${username}: ${message}`,
+        );
+      }
+
+      attempt += 1;
+      this.reconnectState.set(username, { attempting: true, attempt, offline });
+    }
+
+    this.reconnectState.delete(username);
+  }
+
+  disconnect(username) {
+    this.reconnectState.delete(username);
+
+    if (this.connections.has(username)) {
+      const { connection } = this.connections.get(username);
+      this.connections.delete(username);
+      try {
+        connection.close(1000, "server disconnect");
+      } catch {}
+      console.log(`[TikTokService] Disconnected: ${username}`);
+    }
+  }
+
+  updateActivity(username) {
+    if (this.connections.has(username)) {
+      this.connections.get(username).lastActivity = Date.now();
+    }
+  }
+
+  addClientToRoom(username) {
+    const count = this.roomClients.get(username) || 0;
+    this.roomClients.set(username, count + 1);
+    console.log(`[TikTokService] Room ${username}: ${count + 1} clients`);
+  }
+
+  removeClientFromRoom(username) {
+    const count = this.roomClients.get(username) || 0;
+    if (count > 0) {
+      this.roomClients.set(username, count - 1);
+      console.log(`[TikTokService] Room ${username}: ${count - 1} clients`);
+    }
+  }
+
+  getClientCount(username) {
+    return this.roomClients.get(username) || 0;
+  }
+
+  checkInactiveConnections() {
+    const TIMEOUT = 5 * 60 * 1000;
+    const now = Date.now();
+
+    for (const [username, data] of this.connections.entries()) {
+      const clientCount = this.getClientCount(username);
+      const timeSinceActivity = now - data.lastActivity;
+
+      if (clientCount === 0 && timeSinceActivity > TIMEOUT) {
+        console.log(
+          `[TikTokService] Auto-disconnect ${username} (inactive ${Math.round(
+            timeSinceActivity / 1000,
+          )}s, 0 clients)`,
+        );
+        this.disconnect(username);
+      }
+    }
+  }
+
+  getStats() {
+    return {
+      activeConnections: this.connections.size,
+      connections: Array.from(this.connections.keys()),
+      rooms: Object.fromEntries(this.roomClients),
+      transport: "euler-websocket",
+    };
+  }
 }
 
-// Export singleton instance
 export default new TikTokService();

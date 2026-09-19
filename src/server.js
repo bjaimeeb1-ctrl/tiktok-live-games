@@ -37,6 +37,247 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
+const EULER_API_BASE = "https://api.eulerstream.com";
+const GIFT_CATALOG_CACHE_MS = 15 * 60 * 1000;
+let giftCatalogCache = { at: 0, gifts: [] };
+
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
+}
+
+function parseMaybeJson(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function normalizeCatalogGift(row = {}) {
+  const raw = parseMaybeJson(row.raw);
+  const nested = raw.gift || raw.data || raw;
+
+  const id = String(
+    firstDefined(
+      row.id,
+      row.giftId,
+      row.gift_id,
+      nested.id,
+      nested.giftId,
+      nested.gift_id,
+      ""
+    )
+  );
+
+  const name = String(
+    firstDefined(
+      row.name,
+      row.giftName,
+      row.gift_name,
+      row.displayName,
+      row.display_name,
+      nested.name,
+      nested.giftName,
+      nested.gift_name,
+      ""
+    )
+  ).trim();
+
+  const costValue = Number(
+    firstDefined(
+      row.diamondCount,
+      row.diamond_count,
+      row.coinPrice,
+      row.coin_price,
+      row.price,
+      nested.diamondCount,
+      nested.diamond_count,
+      nested.coinPrice,
+      nested.coin_price,
+      nested.price,
+      0
+    )
+  );
+
+  const image = String(
+    firstDefined(
+      row.imageUrl,
+      row.image_url,
+      row.iconUrl,
+      row.icon_url,
+      row.pictureUrl,
+      row.picture_url,
+      nested.imageUrl,
+      nested.image_url,
+      nested.iconUrl,
+      nested.icon_url,
+      nested.pictureUrl,
+      nested.picture_url,
+      nested.image?.urlList?.[0],
+      nested.image?.url_list?.[0],
+      nested.image?.urls?.[0],
+      nested.image?.url,
+      nested.icon?.urlList?.[0],
+      nested.icon?.url_list?.[0],
+      nested.icon?.urls?.[0],
+      nested.icon?.url,
+      row.image?.urlList?.[0],
+      row.image?.url_list?.[0],
+      row.image?.urls?.[0],
+      row.image?.url,
+      row.icon?.urlList?.[0],
+      row.icon?.url_list?.[0],
+      row.icon?.urls?.[0],
+      row.icon?.url,
+      ""
+    )
+  );
+
+  if (!name) return null;
+
+  return {
+    id,
+    name,
+    cost: Number.isFinite(costValue) ? costValue : 0,
+    image,
+  };
+}
+
+function extractRegionalGiftRows(payload = {}) {
+  const candidates = [
+    payload?.gifts,
+    payload?.gift_list,
+    payload?.giftList,
+    payload?.data?.gifts,
+    payload?.data?.gift_list,
+    payload?.data?.giftList,
+    payload?.data?.gift_data,
+    payload?.data?.giftData,
+  ];
+
+  return candidates.find(Array.isArray) || [];
+}
+
+async function fetchJson(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+    let payload = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = {};
+    }
+
+    return { response, payload };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchEulerGiftCatalog() {
+  const apiKey = process.env.EULER_API_KEY;
+  if (!apiKey) {
+    throw new Error("EULER_API_KEY is not configured");
+  }
+
+  if (
+    giftCatalogCache.gifts.length &&
+    Date.now() - giftCatalogCache.at < GIFT_CATALOG_CACHE_MS
+  ) {
+    return giftCatalogCache.gifts;
+  }
+
+  // Important: this is the regional TikTok gift endpoint, NOT Euler's global catalog.
+  // The requested region is locked to Brazil so only gifts TikTok exposes in BR
+  // are offered by the Snake gift configurator.
+  const regionalEndpoint = new URL("/webcast/gifts", EULER_API_BASE);
+  regionalEndpoint.searchParams.set("region", "BR");
+  regionalEndpoint.searchParams.set("webcast_language", "en");
+  regionalEndpoint.searchParams.set("redirect", "false");
+
+  const headers = {
+    "X-Api-Key": apiKey,
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
+
+  const { response: signedResponse, payload: signedPayload } = await fetchJson(
+    regionalEndpoint,
+    { headers }
+  );
+
+  if (!signedResponse.ok) {
+    const details = JSON.stringify(signedPayload || {});
+    const message =
+      signedPayload?.message ||
+      `Euler Brazil gifts request failed with HTTP ${signedResponse.status}`;
+    throw new Error(`${message} | response=${details}`);
+  }
+
+  // Euler returns the signed TikTok URL for the selected region.
+  // Fetch it server-side so the API key never reaches the browser.
+  const signedUrl = signedPayload?.url;
+  let regionalPayload = signedPayload;
+
+  if (signedUrl) {
+    const { response: tikTokResponse, payload: tikTokPayload } = await fetchJson(
+      signedUrl,
+      {
+        headers: {
+          Accept: "application/json",
+          "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
+        },
+      }
+    );
+
+    if (!tikTokResponse.ok) {
+      throw new Error(
+        `TikTok Brazil gift list request failed with HTTP ${tikTokResponse.status}`
+      );
+    }
+
+    regionalPayload = tikTokPayload;
+  }
+
+  const rows = extractRegionalGiftRows(regionalPayload);
+  if (!rows.length) {
+    throw new Error("TikTok returned no gifts for region BR");
+  }
+
+  const seen = new Set();
+  const gifts = rows
+    .map(normalizeCatalogGift)
+    .filter(Boolean)
+    .filter((gift) => {
+      const key = gift.id || gift.name.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      const costDiff = (a.cost || 0) - (b.cost || 0);
+      return costDiff || a.name.localeCompare(b.name, "pt-BR");
+    });
+
+  if (!gifts.length) {
+    throw new Error("Could not normalize TikTok gifts for region BR");
+  }
+
+  giftCatalogCache = { at: Date.now(), gifts };
+  return gifts;
+}
+
 // ==========================================
 // MIDDLEWARE & STATIC FILES
 // ==========================================
@@ -69,6 +310,31 @@ app.get("/api/health", (req, res) => {
  */
 app.get("/api/stats", (req, res) => {
   res.json(tiktokService.getStats());
+});
+
+/**
+ * Proxy the Euler Stream TikTok LIVE gift catalog.
+ * Keeps the Euler API key server-side and gives the game a simple normalized list.
+ * @route GET /api/gifts/catalog
+ */
+app.get("/api/gifts/catalog", async (req, res) => {
+  try {
+    const gifts = await fetchEulerGiftCatalog();
+    res.json({
+      status: "ok",
+      region: "BR",
+      count: gifts.length,
+      gifts,
+      cachedAt: giftCatalogCache.at,
+    });
+  } catch (error) {
+    console.error(`[GiftCatalog] ${error.message}`);
+    res.status(502).json({
+      status: "error",
+      message: error.message,
+      gifts: [],
+    });
+  }
 });
 
 // ==========================================

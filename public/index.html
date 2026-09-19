@@ -9,21 +9,15 @@
       content="Create game overlays for your TikTok Live. Increase viewer engagement with real-time mini-games."
     />
 
-    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code&display=swap"
       rel="stylesheet"
     />
-
-    <!-- Styles -->
     <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body>
-    <!-- ==========================================
-         HEADER
-         ========================================== -->
     <header class="header">
       <div class="container">
         <div class="header-content">
@@ -40,9 +34,6 @@
       </div>
     </header>
 
-    <!-- ==========================================
-         HERO SECTION
-         ========================================== -->
     <section class="hero">
       <div class="container">
         <h1 class="hero-title">Create Game Overlays for TikTok Live</h1>
@@ -53,12 +44,8 @@
       </div>
     </section>
 
-    <!-- ==========================================
-         MAIN DASHBOARD CARD
-         ========================================== -->
     <main class="container">
       <div class="glass-card">
-        <!-- Step 1: Input Username -->
         <div class="form-group">
           <label for="username" class="form-label"> 📱 Your TikTok Username </label>
           <input
@@ -70,18 +57,16 @@
           />
         </div>
 
-        <!-- Step 2: Select Game -->
         <div class="form-group" id="games">
           <label class="form-label"> 🎯 Select Game for Stream </label>
           <div class="game-grid">
-            <!-- Horse Racing Game Card -->
             <div
               class="game-card selected"
               data-game="horse-racing"
               data-entry="index.html"
               data-param="id"
             >
-              <span class="game-card-badge">NEW</span>
+              <span class="game-card-badge">LIVE</span>
               <div class="game-card-icon">🏇</div>
               <h3 class="game-card-title">Horse Racing</h3>
               <p class="game-card-desc">
@@ -90,7 +75,21 @@
               </p>
             </div>
 
-            <!-- Future Expansion Placeholder -->
+            <div
+              class="game-card"
+              data-game="snake"
+              data-entry="index.html"
+              data-param="id"
+            >
+              <span class="game-card-badge">NEW</span>
+              <div class="game-card-icon">🐍</div>
+              <h3 class="game-card-title">Cobrinha da Live</h3>
+              <p class="game-card-desc">
+                Classic Snake gameplay with a modern vertical overlay. Gifts add food, turbo,
+                obstacles and shields while the audience changes the match in real time.
+              </p>
+            </div>
+
             <div class="game-card" style="opacity: 0.5; cursor: not-allowed">
               <div class="game-card-icon">🎰</div>
               <h3 class="game-card-title">Wheel of Fortune</h3>
@@ -107,14 +106,12 @@
           </div>
         </div>
 
-        <!-- Step 3: Generate Button -->
         <div class="form-group">
           <button type="button" id="generateBtn" class="btn btn-primary">
             ✨ Generate Game Link
           </button>
         </div>
 
-        <!-- Step 4: Output Section (hidden until generated) -->
         <div class="output-section" id="outputSection">
           <p class="output-label">🔗 Overlay Link for OBS / TikTok Studio:</p>
           <div class="output-wrapper">
@@ -136,27 +133,21 @@
               <li>Open OBS or TikTok Studio</li>
               <li>Add a new Browser Source</li>
               <li>Paste the link into the URL field</li>
-              <li>Set dimensions: 1920x1080 (or custom)</li>
-              <li>Start livestreaming — viewers send gifts to race!</li>
+              <li>For Snake, use a vertical 1080x1920 browser source</li>
+              <li>Start livestreaming — viewers can change the game with gifts!</li>
             </ol>
           </div>
         </div>
       </div>
     </main>
 
-    <!-- ==========================================
-         FOOTER
-         ========================================== -->
     <footer class="footer">
       <div class="container">
         <p>TikTok Live Games v2 &copy; 2026 | Made with 💖 for Streamers Worldwide</p>
       </div>
     </footer>
 
-    <!-- Toast Notification -->
     <div class="toast" id="toast">✅ Link copied!</div>
-
-    <!-- Scripts -->
     <script src="/js/dashboard.js"></script>
   </body>
 </html>
